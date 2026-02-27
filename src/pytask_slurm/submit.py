@@ -45,7 +45,6 @@ class TaskPayload:
     show_locals: bool
     task_filterwarnings: tuple[Any, ...]
     result_path: str
-    sys_path: list[str]
 
 
 def submit_task(
@@ -79,11 +78,11 @@ def submit_task(
         show_locals=session_config["show_locals"],
         task_filterwarnings=get_marks(task, "filterwarnings"),
         result_path=str(result_path),
-        sys_path=sys.path.copy(),
     )
 
-    # Build the sys.path that the runner needs. pytask dynamically loads task modules
-    # without adding their directories to sys.path, so we must include them explicitly.
+    # Write sys.path as a JSON sidecar so the runner can restore it before unpickling.
+    # pytask dynamically loads task modules without adding their directories to sys.path,
+    # so we must include them explicitly.
     import json  # noqa: PLC0415
 
     runner_path = sys.path.copy()

@@ -1,0 +1,88 @@
+"""Unit tests for pytask_slurm.monitor."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+
+from pytask_slurm.monitor import SlurmJobStatus
+from pytask_slurm.monitor import _parse_state
+from pytask_slurm.monitor import poll_job_statuses
+
+
+class TestParseState:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("COMPLETED", SlurmJobStatus.COMPLETED),
+            ("RUNNING", SlurmJobStatus.RUNNING),
+            ("PENDING", SlurmJobStatus.PENDING),
+            ("FAILED", SlurmJobStatus.FAILED),
+            ("TIMEOUT", SlurmJobStatus.TIMEOUT),
+            ("OUT_OF_MEMORY", SlurmJobStatus.OUT_OF_MEMORY),
+            ("NODE_FAIL", SlurmJobStatus.NODE_FAIL),
+            ("CANCELLED", SlurmJobStatus.CANCELLED),
+            ("COMPLETING", SlurmJobStatus.RUNNING),
+            ("CONFIGURING", SlurmJobStatus.PENDING),
+            ("REQUEUED", SlurmJobStatus.PENDING),
+            ("SUSPENDED", SlurmJobStatus.PENDING),
+            ("PREEMPTED", SlurmJobStatus.FAILED),
+        ],
+    )
+    def test_known_states(self, raw: str, expected: SlurmJobStatus) -> None:
+        assert _parse_state(raw) == expected
+
+    def test_cancelled_with_suffix(self) -> None:
+        assert _parse_state("CANCELLED by 12345") == SlurmJobStatus.CANCELLED
+
+    def test_unknown_state(self) -> None:
+        assert _parse_state("SOMETHING_NEW") == SlurmJobStatus.UNKNOWN
+
+    def test_empty_string(self) -> None:
+        assert _parse_state("") == SlurmJobStatus.UNKNOWN
+
+
+class TestPollJobStatuses:
+    def test_empty_list(self) -> None:
+        assert poll_job_statuses([]) == {}
+
+    def test_parses_sacct_output(self) -> None:
+        fake_stdout = "1001|COMPLETED\n1002|RUNNING\n1003|FAILED\n"
+        with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
+            mock_run.return_value.stdout = fake_stdout
+            result = poll_job_statuses(["1001", "1002", "1003"])
+
+        assert result == {
+            "1001": SlurmJobStatus.COMPLETED,
+            "1002": SlurmJobStatus.RUNNING,
+            "1003": SlurmJobStatus.FAILED,
+        }
+
+    def test_handles_timeout(self) -> None:
+        import subprocess
+
+        with patch(
+            "pytask_slurm.monitor.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("sacct", 30),
+        ):
+            assert poll_job_statuses(["1001"]) == {}
+
+    def test_handles_missing_sacct(self) -> None:
+        with patch(
+            "pytask_slurm.monitor.subprocess.run",
+            side_effect=FileNotFoundError,
+        ):
+            assert poll_job_statuses(["1001"]) == {}
+
+    def test_constructs_correct_command(self) -> None:
+        with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
+            mock_run.return_value.stdout = ""
+            poll_job_statuses(["100", "200"])
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "sacct"
+        assert "-X" in cmd
+        assert "--parsable2" in cmd
+        assert "--noheader" in cmd
+        assert "--jobs=100,200" in cmd
