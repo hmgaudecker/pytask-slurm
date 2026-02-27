@@ -51,6 +51,7 @@ class TestPollJobStatuses:
         fake_stdout = "1001|COMPLETED\n1002|RUNNING\n1003|FAILED\n"
         with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
             mock_run.return_value.stdout = fake_stdout
+            mock_run.return_value.returncode = 0
             result = poll_job_statuses(["1001", "1002", "1003"])
 
         assert result == {
@@ -74,6 +75,27 @@ class TestPollJobStatuses:
             side_effect=FileNotFoundError,
         ):
             assert poll_job_statuses(["1001"]) == {}
+
+    def test_skips_lines_without_delimiter(self) -> None:
+        fake_stdout = "1001|COMPLETED\ngarbage_no_pipe\n1002|RUNNING\n"
+        with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
+            mock_run.return_value.stdout = fake_stdout
+            mock_run.return_value.returncode = 0
+            result = poll_job_statuses(["1001", "1002"])
+
+        assert result == {
+            "1001": SlurmJobStatus.COMPLETED,
+            "1002": SlurmJobStatus.RUNNING,
+        }
+
+    def test_handles_extra_trailing_delimiters(self) -> None:
+        fake_stdout = "1001|COMPLETED|extra|fields\n"
+        with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
+            mock_run.return_value.stdout = fake_stdout
+            mock_run.return_value.returncode = 0
+            result = poll_job_statuses(["1001"])
+
+        assert result == {"1001": SlurmJobStatus.COMPLETED}
 
     def test_constructs_correct_command(self) -> None:
         with patch("pytask_slurm.monitor.subprocess.run") as mock_run:

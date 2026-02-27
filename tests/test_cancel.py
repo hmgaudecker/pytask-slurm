@@ -11,14 +11,17 @@ class TestCancelJobs:
     def test_empty_list_does_nothing(self) -> None:
         with patch("pytask_slurm.cancel.subprocess.run") as mock_run:
             cancel_jobs([])
-        mock_run.assert_not_called()
+            mock_run.assert_not_called()
 
     def test_calls_scancel_with_job_ids(self) -> None:
         with patch("pytask_slurm.cancel.subprocess.run") as mock_run:
             cancel_jobs(["100", "200", "300"])
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert cmd == ["scancel", "100", "200", "300"]
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            assert cmd == ["scancel", "100", "200", "300"]
+            kwargs = mock_run.call_args[1]
+            assert kwargs["capture_output"] is True
+            assert kwargs["timeout"] == 30
 
     def test_never_raises_on_error(self) -> None:
         with patch(
