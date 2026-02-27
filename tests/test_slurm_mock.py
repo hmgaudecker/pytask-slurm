@@ -1,0 +1,138 @@
+"""Integration test for pytask-slurm using mock SLURM commands."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import textwrap
+from pathlib import Path
+
+import pytest
+from pytask import ExitCode
+from pytask import build
+
+MOCK_SLURM_DIR = Path(__file__).parent / "mock_slurm"
+
+
+@pytest.fixture()
+def mock_slurm_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Put mock SLURM scripts on PATH and set up state directory."""
+    state_dir = tmp_path / "slurm_state"
+    state_dir.mkdir()
+    monkeypatch.setenv("MOCK_SLURM_STATE", str(state_dir))
+
+    # Prepend mock_slurm to PATH so sbatch/sacct/scancel resolve to our mocks.
+    monkeypatch.setenv("PATH", f"{MOCK_SLURM_DIR}:{os.environ['PATH']}")
+
+    return state_dir
+
+
+def test_simple_task(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """A single task that writes a file should complete via mock SLURM."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("hello.txt"),
+        ) -> None:
+            output.write_text("hello from slurm")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("hello.txt").exists()
+    assert tmp_path.joinpath("hello.txt").read_text() == "hello from slurm"
+
+
+def test_two_independent_tasks(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """Two independent tasks should both complete."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_one(
+            output: Annotated[Path, Product] = Path("out_1.txt"),
+        ) -> None:
+            output.write_text("1")
+
+
+        def task_two(
+            output: Annotated[Path, Product] = Path("out_2.txt"),
+        ) -> None:
+            output.write_text("2")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("out_1.txt").read_text() == "1"
+    assert tmp_path.joinpath("out_2.txt").read_text() == "2"
+
+
+def test_failing_task(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """A task that raises should be reported as failed."""
+    source = textwrap.dedent("""\
+        def task_fail() -> None:
+            msg = "intentional failure"
+            raise RuntimeError(msg)
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.FAILED
+
+
+def test_task_with_dependency(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """A task that depends on another task's output."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_produce(
+            output: Annotated[Path, Product] = Path("intermediate.txt"),
+        ) -> None:
+            output.write_text("data")
+
+
+        def task_consume(
+            dep: Path = Path("intermediate.txt"),
+            output: Annotated[Path, Product] = Path("final.txt"),
+        ) -> None:
+            output.write_text(dep.read_text() + " processed")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("final.txt").read_text() == "data processed"

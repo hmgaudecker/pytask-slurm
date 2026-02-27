@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Mock sbatch: parse --wrap command, run it in the background, return a fake job ID."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+# Persistent job counter file.
+STATE_DIR = Path(os.environ.get("MOCK_SLURM_STATE", "/tmp/mock_slurm_state"))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+counter_file = STATE_DIR / "job_counter"
+jobs_file = STATE_DIR / "jobs.json"
+
+# Increment job counter atomically enough for tests.
+if counter_file.exists():
+    job_id = int(counter_file.read_text().strip()) + 1
+else:
+    job_id = 1000
+
+counter_file.write_text(str(job_id))
+
+# Parse arguments to find --wrap and --output.
+wrap_cmd = None
+log_path = None
+for arg in sys.argv[1:]:
+    if arg.startswith("--wrap="):
+        wrap_cmd = arg[len("--wrap="):]
+    elif arg.startswith("--output="):
+        log_path = arg[len("--output="):]
+
+if wrap_cmd is None:
+    print("mock sbatch: no --wrap found", file=sys.stderr)
+    sys.exit(1)
+
+# Record the job so mock sacct can track it.
+jobs: dict[str, dict[str, str]] = {}
+if jobs_file.exists():
+    jobs = json.loads(jobs_file.read_text())
+
+# Extract result path from the wrap command to let sacct check completion.
+# The wrap command looks like: python -m pytask_slurm.runner <payload> <result>
+parts = wrap_cmd.split()
+result_path = parts[-1] if len(parts) >= 2 else ""
+
+jobs[str(job_id)] = {
+    "wrap_cmd": wrap_cmd,
+    "result_path": result_path,
+    "log_path": log_path or "",
+    "status": "RUNNING",
+}
+jobs_file.write_text(json.dumps(jobs))
+
+# Run the wrap command directly (simulating SLURM executing the job).
+log_fh = open(log_path, "w") if log_path else subprocess.DEVNULL
+proc = subprocess.Popen(
+    wrap_cmd,
+    shell=True,
+    stdout=log_fh,
+    stderr=log_fh,
+)
+
+# Store pid so we could cancel it.
+jobs[str(job_id)]["pid"] = str(proc.pid)
+jobs_file.write_text(json.dumps(jobs))
+
+# sbatch --parsable prints job ID to stdout.
+print(str(job_id))

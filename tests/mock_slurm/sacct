@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Mock sacct: check if result pickle exists to determine job completion."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+STATE_DIR = Path(os.environ.get("MOCK_SLURM_STATE", "/tmp/mock_slurm_state"))
+jobs_file = STATE_DIR / "jobs.json"
+
+# Parse --jobs= argument.
+requested_ids: list[str] = []
+for arg in sys.argv[1:]:
+    if arg.startswith("--jobs="):
+        requested_ids = arg[len("--jobs="):].split(",")
+
+if not jobs_file.exists():
+    sys.exit(0)
+
+jobs = json.loads(jobs_file.read_text())
+
+# Output in sacct --parsable2 --noheader --format=JobIDRaw,State format.
+for job_id in requested_ids:
+    job = jobs.get(job_id.strip())
+    if job is None:
+        continue
+
+    result_path = job.get("result_path", "")
+    if result_path and Path(result_path).exists():
+        status = "COMPLETED"
+    else:
+        # Check if the process is still running.
+        pid = job.get("pid")
+        if pid:
+            try:
+                os.kill(int(pid), 0)
+                status = "RUNNING"
+            except OSError:
+                # Process finished but no result file -- FAILED.
+                status = "FAILED"
+        else:
+            status = "RUNNING"
+
+    print(f"{job_id.strip()}|{status}")

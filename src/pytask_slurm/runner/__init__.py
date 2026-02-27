@@ -1,0 +1,175 @@
+"""Runner script executed inside SLURM jobs.
+
+Invoked as: ``python -m pytask_slurm.runner <payload.pkl> <result.pkl>``
+
+Loads the serialized task, executes it with stdout/stderr/warning capture,
+and writes a ``WrapperResult`` to the result pickle.
+"""
+
+from __future__ import annotations
+
+import sys
+import warnings
+from contextlib import redirect_stderr
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+from typing import TYPE_CHECKING
+from typing import cast
+
+import cloudpickle
+from pytask import PythonNode
+from pytask import Traceback
+from pytask import WarningReport
+from pytask import console
+from pytask import parse_warning_filter
+from pytask import warning_record_to_str
+from pytask.tree_util import tree_map_with_path
+
+from pytask_parallel.typing import CarryOverPath
+from pytask_parallel.wrappers import WrapperResult
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from pytask import PNode
+    from pytask import PTask
+    from rich.console import ConsoleOptions
+
+
+def _handle_function_products(
+    task: PTask, out: Any
+) -> Any:
+    """Handle return-value products (same logic as pytask-parallel, local only)."""
+    from pytask.tree_util import tree_structure  # noqa: PLC0415
+
+    if "return" in task.produces:
+        structure_out = tree_structure(out)
+        structure_return = tree_structure(task.produces["return"])
+        if not structure_return.is_prefix(structure_out, strict=False):
+            msg = (
+                "The structure of the return annotation is not a subtree of "
+                "the structure of the function return.\n\nFunction return: "
+                f"{structure_out}\n\nReturn annotation: {structure_return}"
+            )
+            raise ValueError(msg)
+
+    def _save_and_carry_over_product(
+        path: tuple[Any, ...], node: PNode
+    ) -> CarryOverPath | PythonNode | None:
+        argument = path[0]
+
+        if argument != "return":
+            if isinstance(node, PythonNode):
+                return node
+            return None
+
+        value = out
+        for p in path[1:]:
+            value = value[p]
+
+        if isinstance(node, PythonNode):
+            node.save(value=value)
+            return node
+
+        node.save(value)
+        return None
+
+    return tree_map_with_path(_save_and_carry_over_product, task.produces)
+
+
+def _render_traceback_to_string(
+    exc_info: tuple[type[BaseException], BaseException, Any],
+    show_locals: bool,  # noqa: FBT001
+    console_options: ConsoleOptions,
+) -> tuple[type[BaseException], BaseException, str]:
+    """Render traceback to string for serialization."""
+    traceback = Traceback(exc_info, show_locals=show_locals)
+    segments = console.render(cast("Any", traceback), options=console_options)
+    text = "".join(segment.text for segment in segments)
+    return (*exc_info[:2], text)
+
+
+def run_task(payload_path: str, result_path: str) -> None:
+    """Load payload, execute task, write result."""
+    # Restore sys.path from the submitting process so that task modules are importable.
+    # This file is written alongside the payload by submit_task().
+    import json  # noqa: PLC0415
+
+    payload_p = Path(payload_path)
+    sys_path_file = payload_p.parent / payload_p.name.replace("_payload.pkl", "_syspath.json")
+    if sys_path_file.exists():
+        saved_path: list[str] = json.loads(sys_path_file.read_text())
+        for entry in saved_path:
+            if entry not in sys.path:
+                sys.path.insert(0, entry)
+
+    with open(payload_path, "rb") as f:
+        payload = cloudpickle.load(f)  # noqa: S301
+
+    task = payload.task
+    kwargs = payload.kwargs
+    console_options = payload.console_options
+    session_filterwarnings = payload.session_filterwarnings
+    show_locals = payload.show_locals
+    task_filterwarnings = payload.task_filterwarnings
+
+    captured_stdout_buffer = StringIO()
+    captured_stderr_buffer = StringIO()
+
+    with (
+        warnings.catch_warnings(record=True) as log,
+        redirect_stdout(captured_stdout_buffer),
+        redirect_stderr(captured_stderr_buffer),
+    ):
+        for arg in session_filterwarnings:
+            warnings.filterwarnings(*parse_warning_filter(arg, escape=False))
+        for mark in task_filterwarnings:
+            for arg in mark.args:
+                warnings.filterwarnings(*parse_warning_filter(arg, escape=False))
+
+        try:
+            out = task.execute(**kwargs)
+        except Exception:  # noqa: BLE001
+            exc_info = sys.exc_info()
+            processed_exc_info = _render_traceback_to_string(
+                exc_info,  # type: ignore[arg-type]
+                show_locals,
+                console_options,
+            )
+            products = None
+        else:
+            products = _handle_function_products(task, out)
+            processed_exc_info = None
+
+        task_display_name = getattr(task, "display_name", task.name)
+        warning_reports = []
+        for warning_message in log:
+            fs_location = warning_message.filename, warning_message.lineno
+            warning_reports.append(
+                WarningReport(
+                    message=warning_record_to_str(warning_message),
+                    fs_location=fs_location,
+                    id_=task_display_name,
+                )
+            )
+
+    captured_stdout_buffer.seek(0)
+    captured_stderr_buffer.seek(0)
+    captured_stdout = captured_stdout_buffer.read()
+    captured_stderr = captured_stderr_buffer.read()
+    captured_stdout_buffer.close()
+    captured_stderr_buffer.close()
+
+    wrapper_result = WrapperResult(
+        carry_over_products=products,
+        warning_reports=warning_reports,
+        exc_info=processed_exc_info,
+        stdout=captured_stdout,
+        stderr=captured_stderr,
+    )
+
+    result_file = Path(result_path)
+    result_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(result_file, "wb") as f:
+        cloudpickle.dump(wrapper_result, f)
