@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 _SLURM_MARK_KEYS = frozenset({"partition", "time", "mem", "cpus_per_task", "account"})
 _SLURM_INT_KEYS = frozenset({"cpus_per_task"})
+_NULLABLE_KEYS = frozenset({"partition", "account"})
 
 
 @dataclass(frozen=True)
@@ -45,12 +46,15 @@ class TaskPayload:
     console_options: Any
     session_filterwarnings: tuple[str, ...]
     show_locals: bool
-    task_filterwarnings: tuple[Any, ...]
+    task_filterwarnings: list[Any]
     result_path: str
 
 
 def _validate_slurm_option(
-    key: str, value: Any, task_name: str, source: str = "SLURM option"
+    key: str,
+    value: Any,  # noqa: ANN401
+    task_name: str,
+    source: str = "SLURM option",
 ) -> None:
     """Validate a single SLURM option value (type and range)."""
     if key in _SLURM_INT_KEYS:
@@ -75,15 +79,44 @@ def _validate_slurm_option(
             raise ValueError(msg)
         if not value:
             msg = (
-                f"{source} {key!r} for task {task_name!r} "
-                f"must not be an empty string."
+                f"{source} {key!r} for task {task_name!r} must not be an empty string."
             )
             raise ValueError(msg)
 
 
+def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
+    """Validate and return kwargs from a single ``@pytask.mark.slurm`` decorator."""
+    if mark.args:
+        msg = (
+            f"@pytask.mark.slurm for task {task_name!r} received positional "
+            f"arguments {mark.args!r}. Use keyword arguments instead, e.g. "
+            f"@pytask.mark.slurm(partition='gpu')."
+        )
+        raise ValueError(msg)
+
+    unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
+    if unknown:
+        msg = (
+            f"Unknown @pytask.mark.slurm kwargs for task {task_name!r}: "
+            f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
+        )
+        raise ValueError(msg)
+
+    for key, value in mark.kwargs.items():
+        if value is None:
+            msg = (
+                f"@pytask.mark.slurm kwarg {key!r} for task {task_name!r} "
+                f"must not be None."
+            )
+            raise ValueError(msg)
+        _validate_slurm_option(key, value, task_name, source="@pytask.mark.slurm kwarg")
+
+    return dict(mark.kwargs)
+
+
 def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str, Any]:
     """Build SLURM resource options by merging global defaults with per-task marks."""
-    options = {
+    options: dict[str, Any] = {
         "partition": session_config["slurm_partition"],
         "time": session_config["slurm_time"],
         "mem": session_config["slurm_mem"],
@@ -107,46 +140,14 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
             _validate_slurm_option(key, value, task.name, source="Global config")
 
     if marks:
-        mark = marks[0]
-
-        if mark.args:
-            msg = (
-                f"@pytask.mark.slurm for task {task.name!r} received positional "
-                f"arguments {mark.args!r}. Use keyword arguments instead, e.g. "
-                f"@pytask.mark.slurm(partition='gpu')."
-            )
-            raise ValueError(msg)
-
-        unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
-        if unknown:
-            msg = (
-                f"Unknown @pytask.mark.slurm kwargs for task {task.name!r}: "
-                f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
-            )
-            raise ValueError(msg)
-
-        for key, value in mark.kwargs.items():
-            if value is None:
-                msg = (
-                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                    f"must not be None."
-                )
-                raise ValueError(msg)
-            _validate_slurm_option(
-                key, value, task.name, source="@pytask.mark.slurm kwarg"
-            )
-
-        options.update(mark.kwargs)
+        options.update(_validate_mark(marks[0], task.name))
 
     # time, mem, and cpus_per_task are always passed to sbatch unconditionally,
     # so they must not be None after merging.  partition and account are
     # optional (only appended when truthy), so None is valid for them.
     for key in ("time", "mem", "cpus_per_task"):
         if options[key] is None:
-            msg = (
-                f"SLURM option {key!r} for task {task.name!r} "
-                f"must not be None."
-            )
+            msg = f"SLURM option {key!r} for task {task.name!r} must not be None."
             raise ValueError(msg)
 
     return options
@@ -227,7 +228,7 @@ def submit_task(
     runner_cmd = f"{sys.executable} -m pytask_slurm.runner {payload_path} {result_path}"
     cmd.append(f"--wrap={runner_cmd}")
 
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         cmd, capture_output=True, check=False, text=True, timeout=30
     )
 

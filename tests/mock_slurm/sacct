@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Mock sacct: check if result pickle exists to determine job completion."""
+# ruff: noqa: T201, S108
 
 from __future__ import annotations
 

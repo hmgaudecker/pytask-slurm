@@ -68,7 +68,7 @@ def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
     ]
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             cmd,
             capture_output=True,
             check=False,
@@ -81,7 +81,7 @@ def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
     statuses: dict[str, SlurmJobStatus] = {}
     for line in result.stdout.strip().splitlines():
         parts = line.split("|")
-        if len(parts) >= 2:
+        if len(parts) >= 2:  # noqa: PLR2004
             job_id, state_str = parts[0], parts[1]
             statuses[job_id] = _parse_state(state_str)
 

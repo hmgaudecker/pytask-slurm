@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -59,8 +60,6 @@ class TestPollJobStatuses:
         }
 
     def test_handles_timeout(self) -> None:
-        import subprocess
-
         with patch(
             "pytask_slurm.monitor.subprocess.run",
             side_effect=subprocess.TimeoutExpired("sacct", 30),

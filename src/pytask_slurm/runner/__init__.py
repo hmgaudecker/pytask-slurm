@@ -13,7 +13,7 @@ import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import cloudpickle
 from pytask import (
@@ -29,13 +29,14 @@ from pytask_parallel.typing import CarryOverPath
 from pytask_parallel.wrappers import WrapperResult
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from pytask import PNode, PTask
     from rich.console import ConsoleOptions
 
 
-def _handle_function_products(task: PTask, out: Any) -> Any:
+def _handle_function_products(
+    task: PTask,
+    out: Any,  # noqa: ANN401
+) -> Any:  # noqa: ANN401
     """Handle return-value products (same logic as pytask-parallel, local only)."""
     from pytask.tree_util import tree_structure  # noqa: PLC0415
 
@@ -76,6 +77,7 @@ def _handle_function_products(task: PTask, out: Any) -> Any:
 
 def _render_traceback_to_string(
     exc_info: tuple[type[BaseException], BaseException, Any],
+    *,
     show_locals: bool,
     console_options: ConsoleOptions,
 ) -> tuple[type[BaseException], BaseException, str]:
@@ -128,12 +130,12 @@ def run_task(payload_path: str, result_path: str) -> None:
 
         try:
             out = task.execute(**kwargs)
-        except Exception:
+        except Exception:  # noqa: BLE001
             exc_info = sys.exc_info()
             processed_exc_info = _render_traceback_to_string(
                 exc_info,  # type: ignore[arg-type]
-                show_locals,
-                console_options,
+                show_locals=show_locals,
+                console_options=console_options,
             )
             products = None
         else:

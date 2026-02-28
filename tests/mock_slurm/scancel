@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Mock scancel: kill processes by job ID."""
+# ruff: noqa: S108
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -20,7 +22,5 @@ jobs = json.loads(jobs_file.read_text())
 for job_id in sys.argv[1:]:
     job = jobs.get(job_id.strip())
     if job and job.get("pid"):
-        try:
+        with contextlib.suppress(OSError):
             os.kill(int(job["pid"]), signal.SIGTERM)
-        except OSError:
-            pass

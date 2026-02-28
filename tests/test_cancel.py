@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import patch
 
 from pytask_slurm.cancel import cancel_jobs
@@ -21,7 +22,7 @@ class TestCancelJobs:
             assert cmd == ["scancel", "100", "200", "300"]
             kwargs = mock_run.call_args[1]
             assert kwargs["capture_output"] is True
-            assert kwargs["timeout"] == 30
+            assert kwargs["timeout"] == 30  # noqa: PLR2004
 
     def test_never_raises_on_error(self) -> None:
         with patch(
@@ -31,8 +32,6 @@ class TestCancelJobs:
             cancel_jobs(["100"])  # Should not raise.
 
     def test_never_raises_on_timeout(self) -> None:
-        import subprocess
-
         with patch(
             "pytask_slurm.cancel.subprocess.run",
             side_effect=subprocess.TimeoutExpired("scancel", 30),

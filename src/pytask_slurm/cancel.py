@@ -12,8 +12,8 @@ def cancel_jobs(job_ids: list[str]) -> None:
         return
 
     with contextlib.suppress(Exception):
-        subprocess.run(
-            ["scancel", *job_ids],
+        subprocess.run(  # noqa: S603
+            ["scancel", *job_ids],  # noqa: S607
             capture_output=True,
             check=False,
             timeout=30,

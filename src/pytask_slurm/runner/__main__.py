@@ -6,7 +6,9 @@ import sys
 
 from pytask_slurm.runner import run_task
 
-if len(sys.argv) != 3:
+_EXPECTED_ARGC = 3
+
+if len(sys.argv) != _EXPECTED_ARGC:
     print(  # noqa: T201
         "Usage: python -m pytask_slurm.runner <payload.pkl> <result.pkl>",
         file=sys.stderr,

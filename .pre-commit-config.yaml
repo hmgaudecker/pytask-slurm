@@ -61,13 +61,6 @@ repos:
           - jupyter
           - pyi
           - python
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.8.2
-    hooks:
-      - id: nbstripout
-        args:
-          - --extra-keys
-          - metadata.kernelspec metadata.language_info.version metadata.vscode
   - repo: https://github.com/executablebooks/mdformat
     rev: 1.0.0
     hooks:

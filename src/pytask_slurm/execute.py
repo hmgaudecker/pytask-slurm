@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import cloudpickle
@@ -19,6 +20,10 @@ from pytask_slurm.submit import SlurmJob, submit_task
 if TYPE_CHECKING:
     from pytask import PTask
     from pytask_parallel.wrappers import WrapperResult
+
+_PENDING_STATUSES = frozenset(
+    {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.UNKNOWN}
+)
 
 
 @hookimpl
@@ -38,101 +43,110 @@ def pytask_execute_build(session: Session) -> bool | None:
     work_dir = session.config["root"] / ".pytask" / "slurm"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    poll_interval = session.config["slurm_poll_interval"]
-    max_jobs = session.config["slurm_max_jobs"]
+    poll_interval: float = session.config["slurm_poll_interval"]
+    max_jobs: int = session.config["slurm_max_jobs"]
 
     try:
         while session.scheduler.is_active():
             try:
-                newly_collected_reports = []
-
-                # Phase 1: Submit ready tasks.
-                n_new_tasks = max_jobs - len(running_jobs)
-                ready_tasks = (
-                    list(session.scheduler.get_ready(n_new_tasks))
-                    if n_new_tasks >= 1
-                    else []
+                newly_collected_reports = _submit_ready_tasks(
+                    session, running_jobs, max_jobs, work_dir
                 )
-
-                for task_name in ready_tasks:
-                    task = session.dag.nodes[task_name]["task"]
-                    session.hook.pytask_execute_task_log_start(
-                        session=session, task=task
-                    )
-                    try:
-                        session.hook.pytask_execute_task_setup(
-                            session=session, task=task
-                        )
-                        slurm_job = submit_task(task, session.config, work_dir)
-                        running_jobs[task_name] = slurm_job
-                    except Exception:
-                        report = ExecutionReport.from_task_and_exception(
-                            task, sys.exc_info()
-                        )
-                        newly_collected_reports.append(report)
-                        session.scheduler.done(task_name)
-
-                # Phase 2: Poll for completed jobs.
-                if running_jobs:
-                    job_id_to_name = {
-                        j.job_id: name for name, j in running_jobs.items()
-                    }
-                    statuses = poll_job_statuses(list(job_id_to_name))
-
-                    for job_id, status in statuses.items():
-                        task_name = job_id_to_name.get(job_id)
-                        if task_name is None:
-                            continue
-
-                        if status in (
-                            SlurmJobStatus.PENDING,
-                            SlurmJobStatus.RUNNING,
-                            SlurmJobStatus.UNKNOWN,
-                        ):
-                            continue
-
-                        slurm_job = running_jobs[task_name]
-                        task = session.dag.nodes[task_name]["task"]
-
-                        if status == SlurmJobStatus.COMPLETED:
-                            report = _process_completed_job(session, task, slurm_job)
-                        else:
-                            report = _process_failed_job(
-                                session, task, slurm_job, status
-                            )
-
-                        newly_collected_reports.append(report)
-                        running_jobs.pop(task_name)
-                        session.scheduler.done(task_name)
-
-                # Phase 3: Process reports.
-                for report in newly_collected_reports:
-                    session.hook.pytask_execute_task_process_report(
-                        session=session, report=report
-                    )
-                    session.hook.pytask_execute_task_log_end(
-                        session=session, report=report
-                    )
-                    reports.append(report)
+                newly_collected_reports.extend(
+                    _collect_completed_jobs(session, running_jobs)
+                )
+                _process_reports(session, newly_collected_reports, reports)
 
                 if session.should_stop:
                     break
 
                 if running_jobs:
                     time.sleep(poll_interval)
-                elif not ready_tasks:
+                else:
                     time.sleep(0.1)
 
             except KeyboardInterrupt:
                 break
 
     finally:
-        # Always cancel remaining SLURM jobs -- they persist beyond process lifetime.
         remaining_ids = [j.job_id for j in running_jobs.values()]
         if remaining_ids:
             cancel_jobs(remaining_ids)
 
     return True
+
+
+def _submit_ready_tasks(
+    session: Session,
+    running_jobs: dict[str, SlurmJob],
+    max_jobs: int,
+    work_dir: Path,
+) -> list[ExecutionReport]:
+    """Submit ready tasks via sbatch, returning reports for failed submissions."""
+    newly_collected: list[ExecutionReport] = []
+    n_new_tasks = max_jobs - len(running_jobs)
+    if n_new_tasks < 1:
+        return newly_collected
+
+    ready_tasks = list(session.scheduler.get_ready(n_new_tasks))
+
+    for task_name in ready_tasks:
+        task = session.dag.nodes[task_name]["task"]
+        session.hook.pytask_execute_task_log_start(session=session, task=task)
+        try:
+            session.hook.pytask_execute_task_setup(session=session, task=task)
+            slurm_job = submit_task(task, session.config, work_dir)
+            running_jobs[task_name] = slurm_job
+        except Exception:  # noqa: BLE001
+            report = ExecutionReport.from_task_and_exception(task, sys.exc_info())
+            newly_collected.append(report)
+            session.scheduler.done(task_name)
+
+    return newly_collected
+
+
+def _collect_completed_jobs(
+    session: Session,
+    running_jobs: dict[str, SlurmJob],
+) -> list[ExecutionReport]:
+    """Poll sacct and return reports for completed/failed jobs."""
+    if not running_jobs:
+        return []
+
+    newly_collected: list[ExecutionReport] = []
+    job_id_to_name = {j.job_id: name for name, j in running_jobs.items()}
+    statuses = poll_job_statuses(list(job_id_to_name))
+
+    for job_id, status in statuses.items():
+        task_name = job_id_to_name.get(job_id)
+        if task_name is None or status in _PENDING_STATUSES:
+            continue
+
+        slurm_job = running_jobs[task_name]
+        task = session.dag.nodes[task_name]["task"]
+
+        if status == SlurmJobStatus.COMPLETED:
+            report = _process_completed_job(session, task, slurm_job)
+        else:
+            report = _process_failed_job(task, slurm_job, status)
+
+        newly_collected.append(report)
+        running_jobs.pop(task_name)
+        session.scheduler.done(task_name)
+
+    return newly_collected
+
+
+def _process_reports(
+    session: Session,
+    newly_collected: list[ExecutionReport],
+    reports: list[ExecutionReport],
+) -> None:
+    """Log and store execution reports."""
+    for report in newly_collected:
+        session.hook.pytask_execute_task_process_report(session=session, report=report)
+        session.hook.pytask_execute_task_log_end(session=session, report=report)
+        reports.append(report)
 
 
 def _process_completed_job(
@@ -144,7 +158,7 @@ def _process_completed_job(
     try:
         with slurm_job.result_path.open("rb") as f:
             wrapper_result: WrapperResult = cloudpickle.load(f)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return ExecutionReport.from_task_and_exception(task, sys.exc_info())
 
     session.warnings.extend(wrapper_result.warning_reports)
@@ -164,14 +178,13 @@ def _process_completed_job(
 
     try:
         session.hook.pytask_execute_task_teardown(session=session, task=task)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return ExecutionReport.from_task_and_exception(task, sys.exc_info())
 
     return ExecutionReport.from_task(task)
 
 
 def _process_failed_job(
-    session: Session,  # noqa: ARG001
     task: PTask,
     slurm_job: SlurmJob,
     status: SlurmJobStatus,
@@ -196,7 +209,7 @@ def _process_failed_job(
 
 def _update_carry_over_products(
     task: PTask,
-    carry_over_products: Any,
+    carry_over_products: Any,  # noqa: ANN401
 ) -> None:
     """Update products carried over from the SLURM worker.
 

@@ -58,48 +58,15 @@ extend-ignore = [
   "COM812", # Conflicts with ruff-format
   "EM101",  # Exception must not use a string literal
   "EM102",  # Exception must not use an f-string literal
-  "FIX002", # Line contains TODO
   "ISC001", # Conflicts with ruff-format
   "TC001",  # Move application import into a type-checking block
   "TC002",  # Move third-party import into a type-checking block
   "TC003",  # Move standard library import into a type-checking block
   "TRY003", # Long messages outside exception class
 ]
-per-file-ignores."src/pytask_slurm/*" = [
-  "ANN",     # Missing type annotations (existing code)
-  "BLE001",  # Blind exception catch (intentional for graceful degradation)
-  "C901",    # Too complex
-  "D",       # Missing docstrings (existing code)
-  "FBT",     # Boolean trap (existing API)
-  "N818",    # Exception name should end in Error
-  "PERF203", # try-except in loop
-  "PLR0912", # Too many branches
-  "PLR0915", # Too many statements
-  "PLR2004", # Magic value comparison
-  "PLW0603", # Global statement
-  "S603",    # subprocess call with non-literal
-  "S607",    # subprocess partial executable path
-]
 per-file-ignores."tests/*" = [
-  "ANN",     # Missing type annotations
-  "ARG",     # Unused function arguments (fixtures)
-  "D",       # Missing docstrings
-  "INP001",  # Implicit namespace packages
-  "PLC0415", # Import not at top level
-  "PLR2004", # Magic value comparison
-  "PT011",   # pytest.raises too broad
-  "PT012",   # pytest.raises contains multiple statements
-  "RUF043",  # Pattern metacharacters in match=
-  "S101",    # Use of assert
-  "S108",    # Insecure temp file usage
-  "S602",    # subprocess shell=True
-  "S603",    # subprocess call with non-literal
-  "S607",    # subprocess partial executable path
-  "SIM105",  # Use contextlib.suppress
-  "SIM108",  # Use ternary operator
-  "SIM115",  # Use context manager for open
-  "PTH123",  # open() vs Path.open()
-  "T201",    # print found
+  "D",    # Missing docstrings
+  "S101", # Use of assert
 ]
 pydocstyle.convention = "google"
 

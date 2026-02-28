@@ -26,7 +26,8 @@ def mock_slurm_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return state_dir
 
 
-def test_simple_task(tmp_path: Path, mock_slurm_env: Path) -> None:
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_simple_task(tmp_path: Path) -> None:
     """A single task that writes a file should complete via mock SLURM."""
     source = textwrap.dedent("""\
         from pathlib import Path
@@ -53,7 +54,8 @@ def test_simple_task(tmp_path: Path, mock_slurm_env: Path) -> None:
     assert tmp_path.joinpath("hello.txt").read_text() == "hello from slurm"
 
 
-def test_two_independent_tasks(tmp_path: Path, mock_slurm_env: Path) -> None:
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_two_independent_tasks(tmp_path: Path) -> None:
     """Two independent tasks should both complete."""
     source = textwrap.dedent("""\
         from pathlib import Path
@@ -86,7 +88,8 @@ def test_two_independent_tasks(tmp_path: Path, mock_slurm_env: Path) -> None:
     assert tmp_path.joinpath("out_2.txt").read_text() == "2"
 
 
-def test_failing_task(tmp_path: Path, mock_slurm_env: Path) -> None:
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_failing_task(tmp_path: Path) -> None:
     """A task that raises should be reported as failed."""
     source = textwrap.dedent("""\
         def task_fail() -> None:
@@ -104,7 +107,8 @@ def test_failing_task(tmp_path: Path, mock_slurm_env: Path) -> None:
     assert session.exit_code == ExitCode.FAILED
 
 
-def test_task_with_dependency(tmp_path: Path, mock_slurm_env: Path) -> None:
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_task_with_dependency(tmp_path: Path) -> None:
     """A task that depends on another task's output."""
     source = textwrap.dedent("""\
         from pathlib import Path
@@ -214,7 +218,8 @@ def test_bare_slurm_mark_uses_defaults(tmp_path: Path, mock_slurm_env: Path) -> 
     assert "--cpus-per-task=1" in sbatch_line
 
 
-def test_positional_mark_args_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_positional_mark_args_raises(tmp_path: Path) -> None:
     """Positional args in @pytask.mark.slurm should produce a clear error."""
     source = textwrap.dedent("""\
         from pathlib import Path
@@ -242,13 +247,14 @@ def test_positional_mark_args_raises(tmp_path: Path, mock_slurm_env: Path) -> No
 
     failed = [r for r in session.execution_reports if r.exc_info and r.exc_info[1]]
     assert failed, "Expected at least one execution report with exception info"
-    exc = failed[0].exc_info[1]
+    exc = failed[0].exc_info[1]  # type: ignore[index]
     assert isinstance(exc, ValueError)
     assert "positional arguments" in str(exc)
     assert "gpu" in str(exc)
 
 
-def test_unknown_mark_kwarg_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_unknown_mark_kwarg_raises(tmp_path: Path) -> None:
     """Typos in @pytask.mark.slurm kwargs should produce a clear error."""
     source = textwrap.dedent("""\
         from pathlib import Path
@@ -278,7 +284,7 @@ def test_unknown_mark_kwarg_raises(tmp_path: Path, mock_slurm_env: Path) -> None
     # Note: relies on pytask's execution_reports / exc_info internals.
     failed = [r for r in session.execution_reports if r.exc_info and r.exc_info[1]]
     assert failed, "Expected at least one execution report with exception info"
-    exc = failed[0].exc_info[1]
+    exc = failed[0].exc_info[1]  # type: ignore[index]
     assert isinstance(exc, ValueError)
     assert "Unknown @pytask.mark.slurm kwargs" in str(exc)
     assert "partitoin" in str(exc)
