@@ -33,3 +33,11 @@ def task_heavy_computation(): ...
 
 Find the full documentation at
 [pytask-slurm.readthedocs.io](https://pytask-slurm.readthedocs.io/).
+
+## Acknowledgements
+
+The SLURM interaction design (job submission, status polling, state mapping) draws on
+ideas from
+[snakemake-executor-plugin-slurm](https://github.com/snakemake/snakemake-executor-plugin-slurm)
+by the Snakemake Community, licensed under the MIT License. See [NOTICE](NOTICE) for
+details.
