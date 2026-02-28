@@ -20,4 +20,6 @@ def pytask_log_session_header(session: Session) -> None:
         parts.append(f"account={config['slurm_account']}")
     if config["slurm_qos"]:
         parts.append(f"qos={config['slurm_qos']}")
+    if config["slurm_extra"]:
+        parts.append(f"extra={config['slurm_extra']!r}")
     console.print(f"SLURM: {', '.join(parts)}")

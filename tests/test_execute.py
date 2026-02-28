@@ -13,7 +13,7 @@ from pytask_slurm.execute import (
     _is_actionable_status,
 )
 from pytask_slurm.monitor import SlurmJobStatus
-from pytask_slurm.submit import SlurmJob, _warn_on_conflicting_extra
+from pytask_slurm.submit import SlurmJob
 
 
 def _make_slurm_job(
@@ -154,23 +154,3 @@ class TestCheckResultFileFallback:
         assert len(reports) == 0
         assert names == []
         mock_process.assert_not_called()
-
-
-class TestWarnOnConflictingExtra:
-    def test_warns_on_generated_flag(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--wrap=something"])
-        assert "--wrap" in caplog.text
-        assert "conflicts" in caplog.text
-
-    def test_no_warning_for_unrelated_flag(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--gres=gpu:1", "--nodelist=node01"])
-        assert caplog.text == ""
-
-    def test_warns_on_flag_with_equals(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--mem=16G"])
-        assert "--mem" in caplog.text

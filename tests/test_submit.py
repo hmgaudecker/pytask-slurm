@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -9,7 +10,11 @@ from unittest.mock import patch
 import pytest
 from pytask import Mark
 
-from pytask_slurm.submit import _build_sbatch_cmd, _get_slurm_options
+from pytask_slurm.submit import (
+    _build_sbatch_cmd,
+    _get_slurm_options,
+    _warn_on_conflicting_extra,
+)
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_partition": "default",
@@ -270,3 +275,28 @@ class TestBuildSbatchCmd:
         paths = (tmp_path / "log", tmp_path / "payload", tmp_path / "result")
         with pytest.raises(TypeError, match="slurm_extra must be a string, got int"):
             _build_sbatch_cmd(opts, config, "abc123", paths)
+
+
+class TestWarnOnConflictingExtra:
+    def test_warns_on_generated_flag(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
+            _warn_on_conflicting_extra(["--wrap=something"])
+        assert "--wrap" in caplog.text
+        assert "conflicts" in caplog.text
+
+    def test_no_warning_for_unrelated_flag(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
+            _warn_on_conflicting_extra(["--gres=gpu:1", "--nodelist=node01"])
+        assert caplog.text == ""
+
+    def test_warns_on_flag_with_equals(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
+            _warn_on_conflicting_extra(["--mem=16G"])
+        assert "--mem" in caplog.text
+
+    def test_warns_on_partition_flag(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
+            _warn_on_conflicting_extra(["--partition=gpu"])
+        assert "--partition" in caplog.text
