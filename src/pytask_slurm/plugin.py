@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING
 
 from pytask import hookimpl
 
-from pytask_slurm import build
-from pytask_slurm import config
+from pytask_slurm import build, config
 
 if TYPE_CHECKING:
     from pluggy import PluginManager

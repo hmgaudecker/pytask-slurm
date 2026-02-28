@@ -15,7 +15,7 @@ jobs_file = STATE_DIR / "jobs.json"
 requested_ids: list[str] = []
 for arg in sys.argv[1:]:
     if arg.startswith("--jobs="):
-        requested_ids = arg[len("--jobs="):].split(",")
+        requested_ids = arg[len("--jobs=") :].split(",")
 
 if not jobs_file.exists():
     sys.exit(0)

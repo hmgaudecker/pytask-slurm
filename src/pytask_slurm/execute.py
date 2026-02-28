@@ -4,25 +4,17 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cloudpickle
 from _pytask.node_protocols import PPathNode
-from pytask import ExecutionReport
-from pytask import PNode
-from pytask import PythonNode
-from pytask import Session
-from pytask import hookimpl
-from pytask.tree_util import tree_map
-from pytask.tree_util import tree_structure
-
+from pytask import ExecutionReport, PNode, PythonNode, Session, hookimpl
+from pytask.tree_util import tree_map, tree_structure
 from pytask_parallel.typing import CarryOverPath
+
 from pytask_slurm.cancel import cancel_jobs
-from pytask_slurm.monitor import SlurmJobStatus
-from pytask_slurm.monitor import poll_job_statuses
-from pytask_slurm.submit import SlurmJob
-from pytask_slurm.submit import submit_task
+from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
+from pytask_slurm.submit import SlurmJob, submit_task
 
 if TYPE_CHECKING:
     from pytask import PTask
@@ -30,7 +22,7 @@ if TYPE_CHECKING:
 
 
 @hookimpl
-def pytask_execute_build(session: Session) -> bool | None:  # noqa: C901, PLR0912, PLR0915
+def pytask_execute_build(session: Session) -> bool | None:
     """Execute tasks by submitting them as SLURM jobs.
 
     Three-phase loop (same structure as pytask-parallel):
@@ -73,7 +65,7 @@ def pytask_execute_build(session: Session) -> bool | None:  # noqa: C901, PLR091
                         )
                         slurm_job = submit_task(task, session.config, work_dir)
                         running_jobs[task_name] = slurm_job
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         report = ExecutionReport.from_task_and_exception(
                             task, sys.exc_info()
                         )
@@ -103,9 +95,7 @@ def pytask_execute_build(session: Session) -> bool | None:  # noqa: C901, PLR091
                         task = session.dag.nodes[task_name]["task"]
 
                         if status == SlurmJobStatus.COMPLETED:
-                            report = _process_completed_job(
-                                session, task, slurm_job
-                            )
+                            report = _process_completed_job(session, task, slurm_job)
                         else:
                             report = _process_failed_job(
                                 session, task, slurm_job, status
@@ -152,9 +142,9 @@ def _process_completed_job(
 ) -> ExecutionReport:
     """Read the result pickle and build an execution report."""
     try:
-        with open(slurm_job.result_path, "rb") as f:
-            wrapper_result: WrapperResult = cloudpickle.load(f)  # noqa: S301
-    except Exception:  # noqa: BLE001
+        with slurm_job.result_path.open("rb") as f:
+            wrapper_result: WrapperResult = cloudpickle.load(f)
+    except Exception:
         return ExecutionReport.from_task_and_exception(task, sys.exc_info())
 
     session.warnings.extend(wrapper_result.warning_reports)
@@ -166,21 +156,22 @@ def _process_completed_job(
 
     if wrapper_result.exc_info is not None:
         return ExecutionReport.from_task_and_exception(
-            task, wrapper_result.exc_info  # type: ignore[arg-type]
+            task,
+            wrapper_result.exc_info,
         )
 
     _update_carry_over_products(task, wrapper_result.carry_over_products)
 
     try:
         session.hook.pytask_execute_task_teardown(session=session, task=task)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return ExecutionReport.from_task_and_exception(task, sys.exc_info())
 
     return ExecutionReport.from_task(task)
 
 
 def _process_failed_job(
-    session: Session,
+    session: Session,  # noqa: ARG001
     task: PTask,
     slurm_job: SlurmJob,
     status: SlurmJobStatus,

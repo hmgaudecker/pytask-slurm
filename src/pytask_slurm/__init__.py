@@ -2,4 +2,4 @@
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+from pytask_slurm._version import __version__  # noqa: F401

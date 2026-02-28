@@ -29,9 +29,9 @@ wrap_cmd = None
 log_path = None
 for arg in sys.argv[1:]:
     if arg.startswith("--wrap="):
-        wrap_cmd = arg[len("--wrap="):]
+        wrap_cmd = arg[len("--wrap=") :]
     elif arg.startswith("--output="):
-        log_path = arg[len("--output="):]
+        log_path = arg[len("--output=") :]
 
 if wrap_cmd is None:
     print("mock sbatch: no --wrap found", file=sys.stderr)

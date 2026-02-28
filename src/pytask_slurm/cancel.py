@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 
 
@@ -10,11 +11,10 @@ def cancel_jobs(job_ids: list[str]) -> None:
     if not job_ids:
         return
 
-    try:
+    with contextlib.suppress(Exception):
         subprocess.run(
             ["scancel", *job_ids],
             capture_output=True,
+            check=False,
             timeout=30,
         )
-    except Exception:  # noqa: BLE001
-        pass

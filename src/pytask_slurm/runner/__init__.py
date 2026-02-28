@@ -10,36 +10,32 @@ from __future__ import annotations
 
 import sys
 import warnings
-from contextlib import redirect_stderr
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import cloudpickle
-from pytask import PythonNode
-from pytask import Traceback
-from pytask import WarningReport
-from pytask import console
-from pytask import parse_warning_filter
-from pytask import warning_record_to_str
+from pytask import (
+    PythonNode,
+    Traceback,
+    WarningReport,
+    console,
+    parse_warning_filter,
+    warning_record_to_str,
+)
 from pytask.tree_util import tree_map_with_path
-
 from pytask_parallel.typing import CarryOverPath
 from pytask_parallel.wrappers import WrapperResult
 
 if TYPE_CHECKING:
     from typing import Any
 
-    from pytask import PNode
-    from pytask import PTask
+    from pytask import PNode, PTask
     from rich.console import ConsoleOptions
 
 
-def _handle_function_products(
-    task: PTask, out: Any
-) -> Any:
+def _handle_function_products(task: PTask, out: Any) -> Any:
     """Handle return-value products (same logic as pytask-parallel, local only)."""
     from pytask.tree_util import tree_structure  # noqa: PLC0415
 
@@ -80,7 +76,7 @@ def _handle_function_products(
 
 def _render_traceback_to_string(
     exc_info: tuple[type[BaseException], BaseException, Any],
-    show_locals: bool,  # noqa: FBT001
+    show_locals: bool,
     console_options: ConsoleOptions,
 ) -> tuple[type[BaseException], BaseException, str]:
     """Render traceback to string for serialization."""
@@ -97,15 +93,17 @@ def run_task(payload_path: str, result_path: str) -> None:
     import json  # noqa: PLC0415
 
     payload_p = Path(payload_path)
-    sys_path_file = payload_p.parent / payload_p.name.replace("_payload.pkl", "_syspath.json")
+    sys_path_file = payload_p.parent / payload_p.name.replace(
+        "_payload.pkl", "_syspath.json"
+    )
     if sys_path_file.exists():
         saved_path: list[str] = json.loads(sys_path_file.read_text())
         for entry in saved_path:
             if entry not in sys.path:
                 sys.path.insert(0, entry)
 
-    with open(payload_path, "rb") as f:
-        payload = cloudpickle.load(f)  # noqa: S301
+    with Path(payload_path).open("rb") as f:
+        payload = cloudpickle.load(f)
 
     task = payload.task
     kwargs = payload.kwargs
@@ -130,7 +128,7 @@ def run_task(payload_path: str, result_path: str) -> None:
 
         try:
             out = task.execute(**kwargs)
-        except Exception:  # noqa: BLE001
+        except Exception:
             exc_info = sys.exc_info()
             processed_exc_info = _render_traceback_to_string(
                 exc_info,  # type: ignore[arg-type]
@@ -171,5 +169,5 @@ def run_task(payload_path: str, result_path: str) -> None:
 
     result_file = Path(result_path)
     result_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(result_file, "wb") as f:
+    with result_file.open("wb") as f:
         cloudpickle.dump(wrapper_result, f)

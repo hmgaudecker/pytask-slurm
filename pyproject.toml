@@ -1,26 +1,166 @@
-[project]
-name = "pytask_slurm"
-version = "0.1.0"
-description = "Submit pytask tasks as SLURM jobs."
-requires-python = ">=3.10"
-dependencies = [
-    "attrs>=21.3.0",
-    "cloudpickle",
-    "pytask>=0.5.2",
-    "pytask-parallel",
-]
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatch-vcs", "hatchling" ]
 
+[project]
+name = "pytask-slurm"
+description = "Submit pytask tasks as SLURM jobs."
+readme = { file = "README.md", content-type = "text/markdown" }
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+classifiers = [
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "attrs>=21.3",
+  "cloudpickle",
+  "pytask>=0.5.2",
+  "pytask-parallel",
+]
+[[project.authors]]
+name = "Hans-Martin von Gaudecker"
+email = "hmgaudecker@gmail.com"
 [project.entry-points.pytask]
 pytask_slurm = "pytask_slurm.plugin"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.hatch.build.hooks.vcs]
+version-file = "src/pytask_slurm/_version.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["tests"]
+exclude = [ "tests" ]
 only-packages = true
 
 [tool.hatch.build.targets.wheel]
-exclude = ["tests"]
-only-packages = true
+only-include = [ "src" ]
+sources = [ "src" ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.ruff]
+target-version = "py314"
+fix = true
+unsafe-fixes = false
+[tool.ruff.lint]
+select = [ "ALL" ]
+extend-ignore = [
+  "COM812", # Conflicts with ruff-format
+  "EM101",  # Exception must not use a string literal
+  "EM102",  # Exception must not use an f-string literal
+  "FIX002", # Line contains TODO
+  "ISC001", # Conflicts with ruff-format
+  "TC001",  # Move application import into a type-checking block
+  "TC002",  # Move third-party import into a type-checking block
+  "TC003",  # Move standard library import into a type-checking block
+  "TRY003", # Long messages outside exception class
+]
+per-file-ignores."src/pytask_slurm/*" = [
+  "ANN",     # Missing type annotations (existing code)
+  "BLE001",  # Blind exception catch (intentional for graceful degradation)
+  "C901",    # Too complex
+  "D",       # Missing docstrings (existing code)
+  "FBT",     # Boolean trap (existing API)
+  "N818",    # Exception name should end in Error
+  "PERF203", # try-except in loop
+  "PLR0912", # Too many branches
+  "PLR0915", # Too many statements
+  "PLR2004", # Magic value comparison
+  "PLW0603", # Global statement
+  "S603",    # subprocess call with non-literal
+  "S607",    # subprocess partial executable path
+]
+per-file-ignores."tests/*" = [
+  "ANN",     # Missing type annotations
+  "ARG",     # Unused function arguments (fixtures)
+  "D",       # Missing docstrings
+  "INP001",  # Implicit namespace packages
+  "PLC0415", # Import not at top level
+  "PLR2004", # Magic value comparison
+  "PT011",   # pytest.raises too broad
+  "PT012",   # pytest.raises contains multiple statements
+  "RUF043",  # Pattern metacharacters in match=
+  "S101",    # Use of assert
+  "S108",    # Insecure temp file usage
+  "S602",    # subprocess shell=True
+  "S603",    # subprocess call with non-literal
+  "S607",    # subprocess partial executable path
+  "SIM105",  # Use contextlib.suppress
+  "SIM108",  # Use ternary operator
+  "SIM115",  # Use context manager for open
+  "PTH123",  # open() vs Path.open()
+  "T201",    # print found
+]
+pydocstyle.convention = "google"
+
+[tool.pyproject-fmt]
+column_width = 88
+max_supported_python = "3.14"
+table_format = "long"
+collapse_tables = [ "tool.hatch" ]
+
+[tool.pytest.ini_options]
+addopts = [ "--pdbcls=pdbp:Pdb" ]
+filterwarnings = [  ]
+norecursedirs = [ "docs" ]
+
+[tool.ty.rules]
+ambiguous-protocol-member = "error"
+deprecated = "error"
+division-by-zero = "error"
+ignore-comment-unknown-rule = "error"
+invalid-argument-type = "error"
+invalid-ignore-comment = "error"
+invalid-return-type = "error"
+possibly-missing-attribute = "error"
+possibly-missing-implicit-call = "error"
+possibly-missing-import = "error"
+possibly-unresolved-reference = "error"
+redundant-cast = "error"
+undefined-reveal = "error"
+unresolved-global = "error"
+unsupported-base = "error"
+unused-ignore-comment = "error"
+useless-overload-body = "error"
+
+[tool.pixi.dependencies]
+jupyterlab = "*"
+prek = "*"
+python = "~=3.14.0"
+
+[tool.pixi.environments]
+default = { features = [ "tests" ], solve-group = "default" }
+
+[tool.pixi.feature.tests.pypi-dependencies]
+pytest = "*"
+pytest-cov = "*"
+pytest-xdist = "*"
+ty = "*"
+
+[tool.pixi.feature.tests.tasks]
+tests = "pytest"
+tests-with-cov = "pytest --cov-report=xml --cov=./"
+ty = "ty check"
+
+[tool.pixi.pypi-dependencies]
+pdbp = "*"
+pytask-slurm = { path = ".", editable = true }
+
+[tool.pixi.workspace]
+channels = [ "conda-forge" ]
+platforms = [ "linux-64" ]
+
+[tool.yamlfix]
+line_length = 88
+none_representation = "null"
+sequence_style = "block_style"

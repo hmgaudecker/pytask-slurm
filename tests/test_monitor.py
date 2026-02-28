@@ -6,9 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from pytask_slurm.monitor import SlurmJobStatus
-from pytask_slurm.monitor import _parse_state
-from pytask_slurm.monitor import poll_job_statuses
+from pytask_slurm.monitor import SlurmJobStatus, _parse_state, poll_job_statuses
 
 
 class TestParseState:

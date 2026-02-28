@@ -71,6 +71,7 @@ def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
         result = subprocess.run(
             cmd,
             capture_output=True,
+            check=False,
             text=True,
             timeout=30,
         )

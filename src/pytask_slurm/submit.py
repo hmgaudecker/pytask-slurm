@@ -7,17 +7,16 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cloudpickle
-from pytask import console
-from pytask import get_marks
-
-from pytask_parallel.utils import create_kwargs_for_task
-from pytask_parallel.utils import get_module
-from pytask_parallel.utils import should_pickle_module_by_value
-from pytask_parallel.utils import strip_annotation_locals
+from pytask import console, get_marks
+from pytask_parallel.utils import (
+    create_kwargs_for_task,
+    get_module,
+    should_pickle_module_by_value,
+    strip_annotation_locals,
+)
 
 if TYPE_CHECKING:
     from pytask import PTask
@@ -158,9 +157,9 @@ def submit_task(
         result_path=str(result_path),
     )
 
-    # Write sys.path as a JSON sidecar so the runner can restore it before unpickling.
-    # pytask dynamically loads task modules without adding their directories to sys.path,
-    # so we must include them explicitly.
+    # Write sys.path as a JSON sidecar so the runner can restore it before
+    # unpickling. pytask dynamically loads task modules without adding their
+    # directories to sys.path, so we must include them explicitly.
     import json  # noqa: PLC0415
 
     runner_path = sys.path.copy()
@@ -176,7 +175,7 @@ def submit_task(
     sys_path_file = work_dir / f"{task_hash}_syspath.json"
     sys_path_file.write_text(json.dumps(runner_path))
 
-    with open(payload_path, "wb") as f:
+    with payload_path.open("wb") as f:
         cloudpickle.dump(payload, f)
 
     # Build sbatch command using merged per-task + global options.
@@ -200,7 +199,9 @@ def submit_task(
     runner_cmd = f"{sys.executable} -m pytask_slurm.runner {payload_path} {result_path}"
     cmd.append(f"--wrap={runner_cmd}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        cmd, capture_output=True, check=False, text=True, timeout=30
+    )
 
     if result.returncode != 0:
         msg = f"sbatch failed for task {task.name!r}: {result.stderr.strip()}"

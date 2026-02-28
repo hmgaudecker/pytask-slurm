@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import textwrap
 from pathlib import Path
 
 import pytest
-from pytask import ExitCode
-from pytask import build
+from pytask import ExitCode, build
 
 MOCK_SLURM_DIR = Path(__file__).parent / "mock_slurm"
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_slurm_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Put mock SLURM scripts on PATH and set up state directory."""
     state_dir = tmp_path / "slurm_state"
