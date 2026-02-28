@@ -59,7 +59,16 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "account": session_config["slurm_account"],
     }
 
-    for mark in get_marks(task, "slurm"):
+    marks = get_marks(task, "slurm")
+
+    if len(marks) > 1:
+        msg = (
+            f"Task {task.name!r} has {len(marks)} @pytask.mark.slurm decorators, "
+            f"but only one is allowed. Merge them into a single decorator."
+        )
+        raise ValueError(msg)
+
+    for mark in marks:
         unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
         if unknown:
             msg = (
@@ -67,6 +76,27 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
                 f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
             )
             raise ValueError(msg)
+
+        for key, value in mark.kwargs.items():
+            if value is None:
+                msg = (
+                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
+                    f"must not be None."
+                )
+                raise ValueError(msg)
+            if key == "cpus_per_task" and not isinstance(value, int):
+                msg = (
+                    f"@pytask.mark.slurm kwarg 'cpus_per_task' for task "
+                    f"{task.name!r} must be an int, got {type(value).__name__}."
+                )
+                raise ValueError(msg)
+            if key != "cpus_per_task" and not isinstance(value, str):
+                msg = (
+                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
+                    f"must be a str, got {type(value).__name__}."
+                )
+                raise ValueError(msg)
+
         options.update(mark.kwargs)
 
     return options

@@ -173,6 +173,8 @@ def test_per_task_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
     sbatch_line = " ".join(sbatch_args)
     assert "--mem=16G" in sbatch_line
     assert "--time=02:00:00" in sbatch_line
+    # Non-overridden defaults should still appear with their default values.
+    assert "--cpus-per-task=1" in sbatch_line
 
 
 def test_unknown_mark_kwarg_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
@@ -200,3 +202,11 @@ def test_unknown_mark_kwarg_raises(tmp_path: Path, mock_slurm_env: Path) -> None
     )
 
     assert session.exit_code == ExitCode.FAILED
+
+    # Verify the error is specifically a ValueError about the unknown kwarg.
+    failed = [r for r in session.execution_reports if r.exc_info and r.exc_info[1]]
+    assert failed, "Expected at least one execution report with exception info"
+    exc = failed[0].exc_info[1]
+    assert isinstance(exc, ValueError)
+    assert "Unknown @pytask.mark.slurm kwargs" in str(exc)
+    assert "partitoin" in str(exc)
