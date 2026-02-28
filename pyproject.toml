@@ -28,8 +28,24 @@ dependencies = [
 [[project.authors]]
 name = "Hans-Martin von Gaudecker"
 email = "hmgaudecker@gmail.com"
+
 [project.entry-points.pytask]
 pytask_slurm = "pytask_slurm.plugin"
+
+[project.urls]
+Changelog = "https://pytask-slurm.readthedocs.io/en/latest/changes.html"
+Documentation = "https://pytask-slurm.readthedocs.io/"
+Homepage = "https://pytask-slurm.readthedocs.io/"
+
+[dependency-groups]
+docs = [
+  "furo",
+  "myst-parser",
+  "sphinx<9",
+  "sphinx-autobuild",
+  "sphinx-copybutton",
+  "sphinx-design>=0.3",
+]
 
 [tool.hatch.build.hooks.vcs]
 version-file = "src/pytask_slurm/_version.py"
@@ -64,6 +80,7 @@ extend-ignore = [
   "TC003",  # Move standard library import into a type-checking block
   "TRY003", # Long messages outside exception class
 ]
+per-file-ignores."docs/source/conf.py" = [ "INP001" ]
 per-file-ignores."tests/*" = [
   "D",    # Missing docstrings
   "S101", # Use of assert
@@ -107,6 +124,18 @@ python = "~=3.14.0"
 
 [tool.pixi.environments]
 default = { features = [ "tests" ], solve-group = "default" }
+docs = { features = [ "docs", "tests" ], solve-group = "default" }
+
+[tool.pixi.feature.docs.pypi-dependencies]
+furo = "*"
+myst-parser = "*"
+sphinx = "<9"
+sphinx-autobuild = "*"
+sphinx-copybutton = "*"
+sphinx-design = ">=0.3"
+
+[tool.pixi.feature.docs.tasks]
+docs = { cmd = "sphinx-build -W --keep-going docs/source docs/source/_build/html" }
 
 [tool.pixi.feature.tests.pypi-dependencies]
 pytest = "*"
