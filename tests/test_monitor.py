@@ -100,11 +100,12 @@ class TestPollJobStatuses:
     def test_constructs_correct_command(self) -> None:
         with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
             mock_run.return_value.stdout = ""
+            mock_run.return_value.returncode = 0
             poll_job_statuses(["100", "200"])
 
-        cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "sacct"
-        assert "-X" in cmd
-        assert "--parsable2" in cmd
-        assert "--noheader" in cmd
-        assert "--jobs=100,200" in cmd
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == "sacct"
+            assert "-X" in cmd
+            assert "--parsable2" in cmd
+            assert "--noheader" in cmd
+            assert "--jobs=100,200" in cmd
