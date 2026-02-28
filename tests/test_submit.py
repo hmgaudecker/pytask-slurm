@@ -205,8 +205,57 @@ class TestQosOption:
             _call([_mark(qos="")])
 
 
+_FULL_OPTS: dict[str, Any] = {
+    "partition": "gpu",
+    "time": "02:00:00",
+    "mem": "8G",
+    "cpus_per_task": 4,
+    "account": "research",
+    "qos": "high",
+}
+
+
+def _sbatch_cmd(
+    tmp_path: Path,
+    opts: dict[str, Any] | None = None,
+    extra: str | None = None,
+) -> list[str]:
+    config = {**_DEFAULT_CONFIG, "slurm_extra": extra}
+    return _build_sbatch_cmd(
+        opts or _FULL_OPTS,
+        config,
+        "abc123",
+        (tmp_path / "log", tmp_path / "p", tmp_path / "r"),
+    )
+
+
 class TestBuildSbatchCmd:
     """Tests for _build_sbatch_cmd."""
+
+    def test_all_options_present(self, tmp_path: Path) -> None:
+        cmd = _sbatch_cmd(tmp_path)
+        assert cmd[0] == "sbatch"
+        assert "--parsable" in cmd
+        assert "--job-name=pytask-abc123" in cmd
+        assert "--time=02:00:00" in cmd
+        assert "--mem=8G" in cmd
+        assert "--cpus-per-task=4" in cmd
+        assert "--partition=gpu" in cmd
+        assert "--account=research" in cmd
+        assert "--qos=high" in cmd
+        assert any(flag.startswith("--wrap=") for flag in cmd)
+
+    def test_none_optional_fields_omitted(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "partition": None, "account": None, "qos": None}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert not any(f.startswith("--partition=") for f in cmd)
+        assert not any(f.startswith("--account=") for f in cmd)
+        assert not any(f.startswith("--qos=") for f in cmd)
+
+    def test_slurm_extra_appended(self, tmp_path: Path) -> None:
+        cmd = _sbatch_cmd(tmp_path, extra="--gres=gpu:1 --nodelist=node01")
+        assert "--gres=gpu:1" in cmd
+        assert "--nodelist=node01" in cmd
 
     def test_slurm_extra_non_string_rejected(self, tmp_path: Path) -> None:
         opts: dict[str, Any] = {

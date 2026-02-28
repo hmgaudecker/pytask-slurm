@@ -1,9 +1,9 @@
+---
 version: 2
-
 build:
   os: ubuntu-24.04
   tools:
-    python: "3.12"
+    python: '3.12'
   jobs:
     create_environment:
       - asdf plugin add uv
@@ -11,8 +11,7 @@ build:
       - asdf global uv latest
       - UV_PROJECT_ENVIRONMENT=$READTHEDOCS_VIRTUALENV_PATH uv sync --group docs
     install:
-      - "true"
-
+      - 'true'
 sphinx:
   configuration: docs/source/conf.py
   fail_on_warning: true
