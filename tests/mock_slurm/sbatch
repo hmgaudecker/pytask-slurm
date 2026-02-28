@@ -41,8 +41,10 @@ if jobs_file.exists():
     jobs = json.loads(jobs_file.read_text())
 
 # Extract result path from the wrap command to let sacct check completion.
-# The wrap command looks like: python -m pytask_slurm.runner <payload> <result>
-parts = wrap_cmd.split()
+# The wrap command looks like: "python" -m pytask_slurm.runner "payload" "result"
+import shlex  # noqa: E402
+
+parts = shlex.split(wrap_cmd)
 result_path = parts[-1] if len(parts) >= 2 else ""  # noqa: PLR2004
 
 jobs[str(job_id)] = {

@@ -104,7 +104,12 @@ def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    # Fall back to squeue.
+    # Fall back to squeue.  Note: squeue only reports jobs still in the
+    # scheduler queue.  Once a job finishes it disappears from squeue output,
+    # so this fallback cannot detect terminal states (COMPLETED, FAILED, etc.).
+    # It is therefore only useful while jobs are still queued or running.  If
+    # sacct is persistently unavailable, callers should implement a timeout or
+    # result-file-based detection to avoid polling indefinitely.
     try:
         result = subprocess.run(  # noqa: S603
             _squeue_cmd(job_ids),
