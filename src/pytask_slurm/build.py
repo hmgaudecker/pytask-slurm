@@ -5,6 +5,8 @@ from __future__ import annotations
 import click
 from pytask import hookimpl
 
+from pytask_slurm.config import _DEFAULT_UNKNOWN_TIMEOUT
+
 
 @hookimpl
 def pytask_extend_command_line_interface(cli: click.Group) -> None:
@@ -66,7 +68,7 @@ def pytask_extend_command_line_interface(cli: click.Group) -> None:
         ),
         click.Option(
             ["--slurm-unknown-timeout"],
-            default=600,
+            default=_DEFAULT_UNKNOWN_TIMEOUT,
             type=int,
             help="Seconds a job may stay UNKNOWN before being treated as failed.",
         ),

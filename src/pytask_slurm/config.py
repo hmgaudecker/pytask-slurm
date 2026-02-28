@@ -6,6 +6,8 @@ from typing import Any
 
 from pytask import hookimpl
 
+_DEFAULT_UNKNOWN_TIMEOUT = 600
+
 
 @hookimpl
 def pytask_parse_config(config: dict[str, Any]) -> None:
@@ -24,7 +26,7 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     config.setdefault("slurm_account", None)
     config.setdefault("slurm_qos", None)
     config.setdefault("slurm_extra", None)
-    config.setdefault("slurm_unknown_timeout", 600)
+    config.setdefault("slurm_unknown_timeout", _DEFAULT_UNKNOWN_TIMEOUT)
 
 
 @hookimpl(trylast=True)

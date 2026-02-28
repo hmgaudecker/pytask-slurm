@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +13,7 @@ import pytest
 from pytask_slurm.execute import (
     _check_result_file_fallback,
     _is_actionable_status,
+    _result_file_is_stable,
 )
 from pytask_slurm.monitor import SlurmJobStatus
 from pytask_slurm.submit import SlurmJob
@@ -65,6 +68,15 @@ class TestIsActionableStatus:
             result = _is_actionable_status(SlurmJobStatus.UNKNOWN, job, 600)
         assert result is True
         assert "UNKNOWN state" in caplog.text
+
+    @patch("pytask_slurm.execute.time")
+    def test_unknown_with_custom_timeout(self, mock_time: MagicMock) -> None:
+        mock_time.monotonic.return_value = 60.0
+        job = _make_slurm_job(submitted_at=0.0)
+        # Actionable with timeout=50 (elapsed 60 > 50) …
+        assert _is_actionable_status(SlurmJobStatus.UNKNOWN, job, 50) is True
+        # … but not with timeout=600 (elapsed 60 < 600).
+        assert _is_actionable_status(SlurmJobStatus.UNKNOWN, job, 600) is False
 
 
 class TestCheckResultFileFallback:
@@ -176,3 +188,20 @@ class TestCheckResultFileFallback:
         assert len(reports) == 0
         assert names == []
         mock_process.assert_not_called()
+
+
+class TestResultFileIsStable:
+    def test_old_file_is_stable(self, tmp_path: Path) -> None:
+        p = tmp_path / "result.pkl"
+        p.touch()
+        os.utime(p, (time.time() - 10, time.time() - 10))
+        assert _result_file_is_stable(p) is True
+
+    def test_fresh_file_is_not_stable(self, tmp_path: Path) -> None:
+        p = tmp_path / "result.pkl"
+        p.touch()
+        assert _result_file_is_stable(p) is False
+
+    def test_missing_file_is_not_stable(self, tmp_path: Path) -> None:
+        p = tmp_path / "nonexistent.pkl"
+        assert _result_file_is_stable(p) is False
