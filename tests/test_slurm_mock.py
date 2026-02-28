@@ -177,6 +177,34 @@ def test_per_task_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
     assert "--cpus-per-task=1" in sbatch_line
 
 
+def test_bare_slurm_mark_uses_defaults(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """@pytask.mark.slurm() with no kwargs should use global defaults."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        import pytask
+        from pytask import Product
+
+
+        @pytask.mark.slurm()
+        def task_bare(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("out.txt").read_text() == "done"
+
+
 def test_positional_mark_args_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
     """Positional args in @pytask.mark.slurm should produce a clear error."""
     source = textwrap.dedent("""\

@@ -94,7 +94,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
                 )
                 raise ValueError(msg)
             if key in _SLURM_INT_KEYS:
-                if not isinstance(value, int):
+                if isinstance(value, bool) or not isinstance(value, int):
                     msg = (
                         f"@pytask.mark.slurm kwarg {key!r} for task "
                         f"{task.name!r} must be an int, got {type(value).__name__}."
