@@ -177,6 +177,40 @@ def test_per_task_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
     assert "--cpus-per-task=1" in sbatch_line
 
 
+def test_positional_mark_args_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """Positional args in @pytask.mark.slurm should produce a clear error."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        import pytask
+        from pytask import Product
+
+
+        @pytask.mark.slurm("gpu")
+        def task_pos(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.FAILED
+
+    failed = [r for r in session.execution_reports if r.exc_info and r.exc_info[1]]
+    assert failed, "Expected at least one execution report with exception info"
+    exc = failed[0].exc_info[1]
+    assert isinstance(exc, ValueError)
+    assert "positional arguments" in str(exc)
+    assert "gpu" in str(exc)
+
+
 def test_unknown_mark_kwarg_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
     """Typos in @pytask.mark.slurm kwargs should produce a clear error."""
     source = textwrap.dedent("""\
