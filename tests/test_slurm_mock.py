@@ -204,6 +204,15 @@ def test_bare_slurm_mark_uses_defaults(tmp_path: Path, mock_slurm_env: Path) -> 
     assert session.exit_code == ExitCode.OK
     assert tmp_path.joinpath("out.txt").read_text() == "done"
 
+    # Verify sbatch args contain the global defaults (not silently dropped).
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    sbatch_args = list(jobs.values())[0]["sbatch_args"]
+    sbatch_line = " ".join(sbatch_args)
+    assert "--time=01:00:00" in sbatch_line
+    assert "--mem=4G" in sbatch_line
+    assert "--cpus-per-task=1" in sbatch_line
+
 
 def test_positional_mark_args_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
     """Positional args in @pytask.mark.slurm should produce a clear error."""

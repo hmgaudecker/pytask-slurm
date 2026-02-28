@@ -72,6 +72,14 @@ class TestGetSlurmOptionsValidation:
         with pytest.raises(ValueError, match="2 @pytask.mark.slurm decorators"):
             _call(marks)
 
+    def test_positional_args_rejected(self) -> None:
+        with pytest.raises(ValueError, match="positional arguments"):
+            _call([Mark(name="slurm", args=("gpu",), kwargs={})])
+
+    def test_unknown_kwarg_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unknown @pytask.mark.slurm kwargs"):
+            _call([_mark(typo="x")])
+
     def test_valid_override_merges(self) -> None:
         result = _call([_mark(mem="16G", cpus_per_task=4)])
         assert result["mem"] == "16G"
