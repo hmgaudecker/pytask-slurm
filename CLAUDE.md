@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in
+this repository.
 
 ## Commands
 
@@ -23,25 +24,26 @@ registers via the `pytask_slurm = "pytask_slurm.plugin"` entry-point.
 
 1. **Config** (`config.py`): Registers `@pytask.mark.slurm()` marker and conditionally
    activates the SLURM executor via `pytask_post_parse` hook
-2. **Submit** (`submit.py`): Serializes tasks with cloudpickle, writes a `sys.path` JSON
+1. **Submit** (`submit.py`): Serializes tasks with cloudpickle, writes a `sys.path` JSON
    sidecar, and calls `sbatch --wrap="python -m pytask_slurm.runner <payload> <result>"`
-3. **Poll** (`monitor.py`): Queries `sacct` for job statuses, parses SLURM state strings
+1. **Poll** (`monitor.py`): Queries `sacct` for job statuses, parses SLURM state strings
    (handles suffixes like "CANCELLED by 12345" and variant names)
-4. **Execute** (`execute.py`): Three-phase loop matching pytask-parallel's design —
+1. **Execute** (`execute.py`): Three-phase loop matching pytask-parallel's design —
    submit ready tasks, poll statuses, process completed/failed jobs. Cancels remaining
    jobs on exit.
-5. **Worker** (`runner/`): Runs in isolated SLURM subprocess — restores `sys.path`,
+1. **Worker** (`runner/`): Runs in isolated SLURM subprocess — restores `sys.path`,
    deserializes payload, executes task, captures stdout/stderr/warnings, writes result
    pickle
 
 ### Key design patterns
 
-- **Cloudpickle interchange**: Task payloads and results are serialized to `.pytask/slurm/*.pkl`
-  files; `cloudpickle.register_pickle_by_value()` handles module-local functions
+- **Cloudpickle interchange**: Task payloads and results are serialized to
+  `.pytask/slurm/*.pkl` files; `cloudpickle.register_pickle_by_value()` handles
+  module-local functions
 - **sys.path sidecar**: JSON file alongside payload ensures the worker can import task
   modules that pytask loaded dynamically
-- **Graceful degradation**: `poll_job_statuses()` and `cancel_jobs()` catch all exceptions
-  so missing SLURM commands don't crash the scheduler
+- **Graceful degradation**: `poll_job_statuses()` and `cancel_jobs()` catch all
+  exceptions so missing SLURM commands don't crash the scheduler
 - **Per-task overrides**: `@pytask.mark.slurm(mem="16G", cpus_per_task=4)` merges with
   global CLI defaults; validated at submission time in `_get_slurm_options()`
 

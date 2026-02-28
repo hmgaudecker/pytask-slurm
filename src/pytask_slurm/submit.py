@@ -68,58 +68,62 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         )
         raise ValueError(msg)
 
-    if marks and marks[0].args:
+    if not marks:
+        return options
+
+    mark = marks[0]
+
+    if mark.args:
         msg = (
             f"@pytask.mark.slurm for task {task.name!r} received positional "
-            f"arguments {marks[0].args!r}. Use keyword arguments instead, e.g. "
+            f"arguments {mark.args!r}. Use keyword arguments instead, e.g. "
             f"@pytask.mark.slurm(partition='gpu')."
         )
         raise ValueError(msg)
 
-    for mark in marks:
-        unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
-        if unknown:
+    unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
+    if unknown:
+        msg = (
+            f"Unknown @pytask.mark.slurm kwargs for task {task.name!r}: "
+            f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
+        )
+        raise ValueError(msg)
+
+    for key, value in mark.kwargs.items():
+        if value is None:
             msg = (
-                f"Unknown @pytask.mark.slurm kwargs for task {task.name!r}: "
-                f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
+                f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
+                f"must not be None."
             )
             raise ValueError(msg)
-
-        for key, value in mark.kwargs.items():
-            if value is None:
+        if key in _SLURM_INT_KEYS:
+            if isinstance(value, bool) or not isinstance(value, int):
                 msg = (
-                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                    f"must not be None."
+                    f"@pytask.mark.slurm kwarg {key!r} for task "
+                    f"{task.name!r} must be an int, got {type(value).__name__}."
                 )
                 raise ValueError(msg)
-            if key in _SLURM_INT_KEYS:
-                if isinstance(value, bool) or not isinstance(value, int):
-                    msg = (
-                        f"@pytask.mark.slurm kwarg {key!r} for task "
-                        f"{task.name!r} must be an int, got {type(value).__name__}."
-                    )
-                    raise ValueError(msg)
-                if value <= 0:
-                    msg = (
-                        f"@pytask.mark.slurm kwarg {key!r} for task "
-                        f"{task.name!r} must be a positive integer, got {value}."
-                    )
-                    raise ValueError(msg)
-            else:
-                if not isinstance(value, str):
-                    msg = (
-                        f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                        f"must be a str, got {type(value).__name__}."
-                    )
-                    raise ValueError(msg)
-                if not value:
-                    msg = (
-                        f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                        f"must not be an empty string."
-                    )
-                    raise ValueError(msg)
+            if value <= 0:
+                msg = (
+                    f"@pytask.mark.slurm kwarg {key!r} for task "
+                    f"{task.name!r} must be a positive integer, got {value}."
+                )
+                raise ValueError(msg)
+        else:
+            if not isinstance(value, str):
+                msg = (
+                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
+                    f"must be a str, got {type(value).__name__}."
+                )
+                raise ValueError(msg)
+            if not value:
+                msg = (
+                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
+                    f"must not be an empty string."
+                )
+                raise ValueError(msg)
 
-        options.update(mark.kwargs)
+    options.update(mark.kwargs)
 
     return options
 

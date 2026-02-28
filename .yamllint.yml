@@ -15,7 +15,7 @@ rules:
   empty-values: disable
   float-values: disable
   hyphens: enable
-  indentation: { spaces: 2 }
+  indentation: {spaces: 2}
   key-duplicates: enable
   key-ordering: disable
   line-length:
@@ -31,6 +31,6 @@ rules:
   truthy:
     level: warning
 yaml-files:
-  - "*.yaml"
-  - "*.yml"
+  - '*.yaml'
+  - '*.yml'
   - .yamllint
