@@ -14,6 +14,7 @@ def _make_session(config: dict[str, Any]) -> Any:  # noqa: ANN401
     return type("Session", (), {"config": config})()
 
 
+# Must contain every key that pytask_log_session_header reads from session.config.
 _BASE_CONFIG: dict[str, Any] = {
     "slurm_partition": "gpu",
     "slurm_time": "02:00:00",

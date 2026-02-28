@@ -167,7 +167,9 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
 
 
 # Flags that _build_sbatch_cmd generates.  Used to warn when --slurm-extra
-# duplicates a flag that pytask-slurm already controls.
+# duplicates a flag that pytask-slurm already controls.  Even conditionally-
+# generated flags like --partition are included because the user may not realise
+# that both the dedicated option and --slurm-extra are active.
 _GENERATED_SBATCH_FLAGS = frozenset(
     {
         "--wrap",
