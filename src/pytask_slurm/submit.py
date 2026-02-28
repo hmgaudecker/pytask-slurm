@@ -166,6 +166,10 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
     return options
 
 
+# Flags that _build_sbatch_cmd always generates unconditionally.
+# --partition, --account, and --qos are excluded because they are only appended
+# when truthy, and a user who sets both slurm_partition and --partition via
+# --slurm-extra is making an explicit choice that doesn't need a warning.
 _GENERATED_SBATCH_FLAGS = frozenset(
     {"--wrap", "--output", "--job-name", "--time", "--mem", "--cpus-per-task"}
 )

@@ -130,11 +130,14 @@ def _check_result_file_fallback(
     session: Session,
     running_jobs: dict[str, SlurmJob],
     reported_job_ids: set[str],
-    completed_task_names: list[str],
-) -> list[ExecutionReport]:
-    """Detect completed jobs whose result file exists but sacct/squeue missed them."""
+    already_done: set[str],
+) -> tuple[list[ExecutionReport], list[str]]:
+    """Detect completed jobs whose result file exists but sacct/squeue missed them.
+
+    Returns a tuple of (reports, fallback_task_names).
+    """
     reports: list[ExecutionReport] = []
-    already_done = set(completed_task_names)
+    fallback_task_names: list[str] = []
     for task_name, slurm_job in running_jobs.items():
         if slurm_job.job_id in reported_job_ids or task_name in already_done:
             continue
@@ -147,8 +150,8 @@ def _check_result_file_fallback(
             )
             task = session.dag.nodes[task_name]["task"]
             reports.append(_process_completed_job(session, task, slurm_job))
-            completed_task_names.append(task_name)
-    return reports
+            fallback_task_names.append(task_name)
+    return reports, fallback_task_names
 
 
 def _collect_completed_jobs(
@@ -184,11 +187,11 @@ def _collect_completed_jobs(
     # Result-file fallback: if a job disappeared from both sacct and squeue
     # (e.g. sacct is unavailable and the job finished so squeue no longer
     # lists it), check whether the result pickle exists.
-    newly_collected.extend(
-        _check_result_file_fallback(
-            session, running_jobs, set(statuses), completed_task_names
-        )
+    fallback_reports, fallback_names = _check_result_file_fallback(
+        session, running_jobs, set(statuses), set(completed_task_names)
     )
+    newly_collected.extend(fallback_reports)
+    completed_task_names.extend(fallback_names)
 
     for task_name in completed_task_names:
         running_jobs.pop(task_name)
