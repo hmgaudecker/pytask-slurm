@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -41,9 +42,7 @@ if jobs_file.exists():
     jobs = json.loads(jobs_file.read_text())
 
 # Extract result path from the wrap command to let sacct check completion.
-# The wrap command looks like: "python" -m pytask_slurm.runner "payload" "result"
-import shlex  # noqa: E402
-
+# The wrap command looks like: 'python' -m pytask_slurm.runner 'payload' 'result'
 parts = shlex.split(wrap_cmd)
 result_path = parts[-1] if len(parts) >= 2 else ""  # noqa: PLR2004
 

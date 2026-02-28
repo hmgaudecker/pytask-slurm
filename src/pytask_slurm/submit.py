@@ -198,7 +198,8 @@ def _build_sbatch_cmd(
         cmd.extend(shlex.split(extra))
 
     runner_cmd = (
-        f'"{sys.executable}" -m pytask_slurm.runner "{payload_path}" "{result_path}"'
+        f"{shlex.quote(str(sys.executable))} -m pytask_slurm.runner"
+        f" {shlex.quote(str(payload_path))} {shlex.quote(str(result_path))}"
     )
     cmd.append(f"--wrap={runner_cmd}")
     return cmd
