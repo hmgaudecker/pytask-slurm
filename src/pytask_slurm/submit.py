@@ -138,6 +138,16 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         if value is not None and key not in mark_keys:
             _validate_slurm_option(key, value, task.name)
 
+    # time, mem, and cpus_per_task are always passed to sbatch unconditionally,
+    # so they must not be None after merging.
+    for key in ("time", "mem", "cpus_per_task"):
+        if options[key] is None:
+            msg = (
+                f"SLURM option {key!r} for task {task.name!r} "
+                f"must not be None."
+            )
+            raise ValueError(msg)
+
     return options
 
 

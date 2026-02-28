@@ -115,3 +115,21 @@ class TestGetSlurmOptionsConfigValidation:
         with patch("pytask_slurm.submit.get_marks", return_value=[]):
             result = _get_slurm_options(_FakeTask(), config)
         assert result["partition"] is None
+
+    def test_config_none_time_rejected(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_time": None}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            with pytest.raises(ValueError, match="must not be None"):
+                _get_slurm_options(_FakeTask(), config)
+
+    def test_config_none_mem_rejected(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_mem": None}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            with pytest.raises(ValueError, match="must not be None"):
+                _get_slurm_options(_FakeTask(), config)
+
+    def test_config_none_cpus_per_task_rejected(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": None}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            with pytest.raises(ValueError, match="must not be None"):
+                _get_slurm_options(_FakeTask(), config)
