@@ -137,3 +137,9 @@ class TestGetSlurmOptionsConfigValidation:
         with patch("pytask_slurm.submit.get_marks", return_value=[]):
             with pytest.raises(ValueError, match="must not be None"):
                 _get_slurm_options(_FakeTask(), config)
+
+    def test_invalid_config_caught_even_when_mark_overrides(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": True}
+        with patch("pytask_slurm.submit.get_marks", return_value=[_mark(cpus_per_task=4)]):
+            with pytest.raises(ValueError, match="must be an int, got bool"):
+                _get_slurm_options(_FakeTask(), config)
