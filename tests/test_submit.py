@@ -24,6 +24,8 @@ class _FakeTask:
 
 
 def _call(marks: list[Mark]) -> dict:
+    # Patches get_marks at the module where it is imported; if the import path
+    # in pytask_slurm.submit changes, this patch must be updated accordingly.
     with patch("pytask_slurm.submit.get_marks", return_value=marks):
         return _get_slurm_options(_FakeTask(), _DEFAULT_CONFIG)
 
@@ -53,6 +55,10 @@ class TestGetSlurmOptionsValidation:
         with pytest.raises(ValueError, match="must be a str, got int"):
             _call([_mark(mem=16)])
 
+    def test_account_non_string_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must be a str, got int"):
+            _call([_mark(account=123)])
+
     def test_empty_string_rejected(self) -> None:
         with pytest.raises(ValueError, match="must not be an empty string"):
             _call([_mark(partition="")])
@@ -70,4 +76,6 @@ class TestGetSlurmOptionsValidation:
         result = _call([_mark(mem="16G", cpus_per_task=4)])
         assert result["mem"] == "16G"
         assert result["cpus_per_task"] == 4
-        assert result["time"] == "01:00:00"  # unchanged default
+        assert result["time"] == "01:00:00"
+        assert result["partition"] == "default"
+        assert result["account"] == "myaccount"
