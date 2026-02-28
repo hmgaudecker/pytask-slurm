@@ -70,6 +70,14 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         raise ValueError(msg)
 
     for mark in marks:
+        if mark.args:
+            msg = (
+                f"@pytask.mark.slurm for task {task.name!r} received positional "
+                f"arguments {mark.args!r}. Use keyword arguments instead, e.g. "
+                f"@pytask.mark.slurm(partition='gpu')."
+            )
+            raise ValueError(msg)
+
         unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
         if unknown:
             msg = (
