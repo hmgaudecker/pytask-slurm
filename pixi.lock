@@ -1897,8 +1897,8 @@ packages:
   requires_python: '>=3.10'
 - pypi: ./
   name: pytask-slurm
-  version: 0.1.dev15+gac76457fc.d20260228
-  sha256: ef419014d403587e9e41eb6b12161421964b19e0698a25f792a2c13860a7e5a5
+  version: 0.1.dev17+g7af9d738a.d20260228
+  sha256: 8f0221c4a8e5f198bf4c10bf45759d0279ea1f426d57fbdb112153f04778f04c
   requires_dist:
   - attrs>=21.3
   - cloudpickle

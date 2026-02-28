@@ -49,7 +49,7 @@ allow-direct-references = true
 source = "vcs"
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py311"
 fix = true
 unsafe-fixes = false
 [tool.ruff.lint]
