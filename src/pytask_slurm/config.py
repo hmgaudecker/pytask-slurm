@@ -24,6 +24,7 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     config.setdefault("slurm_account", None)
     config.setdefault("slurm_qos", None)
     config.setdefault("slurm_extra", None)
+    config.setdefault("slurm_unknown_timeout", 600)
 
 
 @hookimpl(trylast=True)

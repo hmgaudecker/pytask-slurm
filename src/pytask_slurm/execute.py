@@ -26,9 +26,6 @@ logger = logging.getLogger(__name__)
 
 _PENDING_STATUSES = frozenset({SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING})
 
-# How long a job may stay in UNKNOWN status before being treated as failed.
-_UNKNOWN_TIMEOUT_SECONDS = 600
-
 
 @hookimpl
 def pytask_execute_build(session: Session) -> bool | None:
@@ -49,6 +46,7 @@ def pytask_execute_build(session: Session) -> bool | None:
 
     poll_interval: float = session.config["slurm_poll_interval"]
     max_jobs: int = session.config["slurm_max_jobs"]
+    unknown_timeout: int = session.config["slurm_unknown_timeout"]
 
     try:
         while session.scheduler.is_active():
@@ -57,7 +55,7 @@ def pytask_execute_build(session: Session) -> bool | None:
                     session, running_jobs, max_jobs, work_dir
                 )
                 newly_collected_reports.extend(
-                    _collect_completed_jobs(session, running_jobs)
+                    _collect_completed_jobs(session, running_jobs, unknown_timeout)
                 )
                 _process_reports(session, newly_collected_reports, reports)
 
@@ -109,21 +107,40 @@ def _submit_ready_tasks(
     return newly_collected
 
 
-def _is_actionable_status(status: SlurmJobStatus, slurm_job: SlurmJob) -> bool:
+def _is_actionable_status(
+    status: SlurmJobStatus, slurm_job: SlurmJob, unknown_timeout: int
+) -> bool:
     """Return True if *status* means the job should be collected now."""
     if status in _PENDING_STATUSES:
         return False
     if status == SlurmJobStatus.UNKNOWN:
-        if time.monotonic() - slurm_job.submitted_at < _UNKNOWN_TIMEOUT_SECONDS:
+        if time.monotonic() - slurm_job.submitted_at < unknown_timeout:
             return False
         logger.warning(
             "SLURM job %s for task %r has been in UNKNOWN state for over "
             "%d seconds; treating as failed.",
             slurm_job.job_id,
             slurm_job.task_name,
-            _UNKNOWN_TIMEOUT_SECONDS,
+            unknown_timeout,
         )
     return True
+
+
+_RESULT_FILE_MIN_AGE_SECONDS = 5
+
+
+def _result_file_is_stable(path: Path) -> bool:
+    """Return True if *path* was last modified at least a few seconds ago.
+
+    Guards against reading a partially-written result pickle: the runner
+    creates the file before writing is complete, so we wait until the mtime
+    is old enough to assume the write has finished.
+    """
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return False
+    return age >= _RESULT_FILE_MIN_AGE_SECONDS
 
 
 def _check_result_file_fallback(
@@ -141,7 +158,9 @@ def _check_result_file_fallback(
     for task_name, slurm_job in running_jobs.items():
         if slurm_job.job_id in reported_job_ids or task_name in already_done:
             continue
-        if slurm_job.result_path.exists():
+        if slurm_job.result_path.exists() and _result_file_is_stable(
+            slurm_job.result_path
+        ):
             logger.info(
                 "SLURM job %s for task %r not reported by sacct/squeue but "
                 "result file exists; treating as completed.",
@@ -157,6 +176,7 @@ def _check_result_file_fallback(
 def _collect_completed_jobs(
     session: Session,
     running_jobs: dict[str, SlurmJob],
+    unknown_timeout: int,
 ) -> list[ExecutionReport]:
     """Poll sacct and return reports for completed/failed jobs."""
     if not running_jobs:
@@ -172,7 +192,7 @@ def _collect_completed_jobs(
         if task_name is None:
             continue
         slurm_job = running_jobs[task_name]
-        if not _is_actionable_status(status, slurm_job):
+        if not _is_actionable_status(status, slurm_job, unknown_timeout):
             continue
 
         task = session.dag.nodes[task_name]["task"]

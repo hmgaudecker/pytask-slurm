@@ -35,25 +35,25 @@ def _make_slurm_job(
 class TestIsActionableStatus:
     def test_pending_not_actionable(self) -> None:
         job = _make_slurm_job()
-        assert _is_actionable_status(SlurmJobStatus.PENDING, job) is False
+        assert _is_actionable_status(SlurmJobStatus.PENDING, job, 600) is False
 
     def test_running_not_actionable(self) -> None:
         job = _make_slurm_job()
-        assert _is_actionable_status(SlurmJobStatus.RUNNING, job) is False
+        assert _is_actionable_status(SlurmJobStatus.RUNNING, job, 600) is False
 
     def test_completed_is_actionable(self) -> None:
         job = _make_slurm_job()
-        assert _is_actionable_status(SlurmJobStatus.COMPLETED, job) is True
+        assert _is_actionable_status(SlurmJobStatus.COMPLETED, job, 600) is True
 
     def test_failed_is_actionable(self) -> None:
         job = _make_slurm_job()
-        assert _is_actionable_status(SlurmJobStatus.FAILED, job) is True
+        assert _is_actionable_status(SlurmJobStatus.FAILED, job, 600) is True
 
     @patch("pytask_slurm.execute.time")
     def test_unknown_within_timeout_not_actionable(self, mock_time: MagicMock) -> None:
         mock_time.monotonic.return_value = 100.0
         job = _make_slurm_job(submitted_at=0.0)
-        assert _is_actionable_status(SlurmJobStatus.UNKNOWN, job) is False
+        assert _is_actionable_status(SlurmJobStatus.UNKNOWN, job, 600) is False
 
     @patch("pytask_slurm.execute.time")
     def test_unknown_after_timeout_is_actionable(
@@ -62,7 +62,7 @@ class TestIsActionableStatus:
         mock_time.monotonic.return_value = 700.0
         job = _make_slurm_job(submitted_at=0.0)
         with caplog.at_level(logging.WARNING, logger="pytask_slurm.execute"):
-            result = _is_actionable_status(SlurmJobStatus.UNKNOWN, job)
+            result = _is_actionable_status(SlurmJobStatus.UNKNOWN, job, 600)
         assert result is True
         assert "UNKNOWN state" in caplog.text
 
@@ -87,12 +87,13 @@ class TestCheckResultFileFallback:
         mock_process.return_value = MagicMock()
         session = self._make_session()
 
-        reports, names = _check_result_file_fallback(
-            session,
-            running_jobs,
-            reported_job_ids=set(),
-            already_done=set(),
-        )
+        with patch("pytask_slurm.execute._result_file_is_stable", return_value=True):
+            reports, names = _check_result_file_fallback(
+                session,
+                running_jobs,
+                reported_job_ids=set(),
+                already_done=set(),
+            )
         assert len(reports) == 1
         assert names == ["task_a"]
 
@@ -132,6 +133,27 @@ class TestCheckResultFileFallback:
             reported_job_ids=set(),
             already_done={"task_a"},
         )
+        assert len(reports) == 0
+        assert names == []
+        mock_process.assert_not_called()
+
+    @patch("pytask_slurm.execute._process_completed_job")
+    def test_skips_job_with_unstable_result_file(
+        self, mock_process: MagicMock, tmp_path: Path
+    ) -> None:
+        result_file = tmp_path / "result.pkl"
+        result_file.touch()
+        job = _make_slurm_job(job_id="111", task_name="task_a", result_path=result_file)
+        running_jobs = {"task_a": job}
+
+        session = self._make_session()
+        with patch("pytask_slurm.execute._result_file_is_stable", return_value=False):
+            reports, names = _check_result_file_fallback(
+                session,
+                running_jobs,
+                reported_job_ids=set(),
+                already_done=set(),
+            )
         assert len(reports) == 0
         assert names == []
         mock_process.assert_not_called()

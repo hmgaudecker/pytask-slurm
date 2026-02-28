@@ -64,5 +64,11 @@ def pytask_extend_command_line_interface(cli: click.Group) -> None:
             default=None,
             help="Extra sbatch flags (e.g. '--gres=gpu:1 --constraint=a100').",
         ),
+        click.Option(
+            ["--slurm-unknown-timeout"],
+            default=600,
+            type=int,
+            help="Seconds a job may stay UNKNOWN before being treated as failed.",
+        ),
     ]
     cli.commands["build"].params.extend(additional_parameters)

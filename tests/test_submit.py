@@ -300,3 +300,14 @@ class TestWarnOnConflictingExtra:
         with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
             _warn_on_conflicting_extra(["--partition=gpu"])
         assert "--partition" in caplog.text
+
+    def test_warns_on_short_flag(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
+            _warn_on_conflicting_extra(["-p", "gpu"])
+        assert "-p" in caplog.text
+        assert "conflicts" in caplog.text
+
+    def test_warns_on_short_time_flag(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
+            _warn_on_conflicting_extra(["-t", "02:00:00"])
+        assert "-t" in caplog.text
