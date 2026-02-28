@@ -83,6 +83,9 @@ class TestPollJobStatuses:
             mock_run.return_value.returncode = 0
             result = poll_job_statuses(["1001", "1002"])
 
+            mock_run.assert_called_once()
+            assert "--jobs=1001,1002" in mock_run.call_args[0][0]
+
         assert result == {
             "1001": SlurmJobStatus.COMPLETED,
             "1002": SlurmJobStatus.RUNNING,
@@ -94,6 +97,9 @@ class TestPollJobStatuses:
             mock_run.return_value.stdout = fake_stdout
             mock_run.return_value.returncode = 0
             result = poll_job_statuses(["1001"])
+
+            mock_run.assert_called_once()
+            assert "--jobs=1001" in mock_run.call_args[0][0]
 
         assert result == {"1001": SlurmJobStatus.COMPLETED}
 
