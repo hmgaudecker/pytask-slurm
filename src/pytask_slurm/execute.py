@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from pathlib import Path
@@ -21,9 +22,12 @@ if TYPE_CHECKING:
     from pytask import PTask
     from pytask_parallel.wrappers import WrapperResult
 
-_PENDING_STATUSES = frozenset(
-    {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.UNKNOWN}
-)
+logger = logging.getLogger(__name__)
+
+_PENDING_STATUSES = frozenset({SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING})
+
+# How long a job may stay in UNKNOWN status before being treated as failed.
+_UNKNOWN_TIMEOUT_SECONDS = 600
 
 
 @hookimpl
@@ -105,6 +109,48 @@ def _submit_ready_tasks(
     return newly_collected
 
 
+def _is_actionable_status(status: SlurmJobStatus, slurm_job: SlurmJob) -> bool:
+    """Return True if *status* means the job should be collected now."""
+    if status in _PENDING_STATUSES:
+        return False
+    if status == SlurmJobStatus.UNKNOWN:
+        if time.monotonic() - slurm_job.submitted_at < _UNKNOWN_TIMEOUT_SECONDS:
+            return False
+        logger.warning(
+            "SLURM job %s for task %r has been in UNKNOWN state for over "
+            "%d seconds; treating as failed.",
+            slurm_job.job_id,
+            slurm_job.task_name,
+            _UNKNOWN_TIMEOUT_SECONDS,
+        )
+    return True
+
+
+def _check_result_file_fallback(
+    session: Session,
+    running_jobs: dict[str, SlurmJob],
+    reported_job_ids: set[str],
+    completed_task_names: list[str],
+) -> list[ExecutionReport]:
+    """Detect completed jobs whose result file exists but sacct/squeue missed them."""
+    reports: list[ExecutionReport] = []
+    already_done = set(completed_task_names)
+    for task_name, slurm_job in running_jobs.items():
+        if slurm_job.job_id in reported_job_ids or task_name in already_done:
+            continue
+        if slurm_job.result_path.exists():
+            logger.info(
+                "SLURM job %s for task %r not reported by sacct/squeue but "
+                "result file exists; treating as completed.",
+                slurm_job.job_id,
+                task_name,
+            )
+            task = session.dag.nodes[task_name]["task"]
+            reports.append(_process_completed_job(session, task, slurm_job))
+            completed_task_names.append(task_name)
+    return reports
+
+
 def _collect_completed_jobs(
     session: Session,
     running_jobs: dict[str, SlurmJob],
@@ -116,21 +162,35 @@ def _collect_completed_jobs(
     newly_collected: list[ExecutionReport] = []
     job_id_to_name = {j.job_id: name for name, j in running_jobs.items()}
     statuses = poll_job_statuses(list(job_id_to_name))
+    completed_task_names: list[str] = []
 
     for job_id, status in statuses.items():
         task_name = job_id_to_name.get(job_id)
-        if task_name is None or status in _PENDING_STATUSES:
+        if task_name is None:
+            continue
+        slurm_job = running_jobs[task_name]
+        if not _is_actionable_status(status, slurm_job):
             continue
 
-        slurm_job = running_jobs[task_name]
         task = session.dag.nodes[task_name]["task"]
-
         if status == SlurmJobStatus.COMPLETED:
             report = _process_completed_job(session, task, slurm_job)
         else:
             report = _process_failed_job(task, slurm_job, status)
 
         newly_collected.append(report)
+        completed_task_names.append(task_name)
+
+    # Result-file fallback: if a job disappeared from both sacct and squeue
+    # (e.g. sacct is unavailable and the job finished so squeue no longer
+    # lists it), check whether the result pickle exists.
+    newly_collected.extend(
+        _check_result_file_fallback(
+            session, running_jobs, set(statuses), completed_task_names
+        )
+    )
+
+    for task_name in completed_task_names:
         running_jobs.pop(task_name)
         session.scheduler.done(task_name)
 
