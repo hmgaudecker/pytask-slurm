@@ -104,7 +104,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
     # when a mark overrides the key, so misconfigurations don't go unnoticed).
     for key, value in options.items():
         if value is not None:
-            _validate_slurm_option(key, value, task.name)
+            _validate_slurm_option(key, value, task.name, source="Global config")
 
     if marks:
         mark = marks[0]

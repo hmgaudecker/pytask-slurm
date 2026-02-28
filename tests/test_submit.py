@@ -19,6 +19,8 @@ _DEFAULT_CONFIG = {
 
 
 class _FakeTask:
+    """Minimal stub — only ``name`` is needed by ``_get_slurm_options``."""
+
     def __init__(self, name: str = "task_example") -> None:
         self.name = name
 
@@ -99,19 +101,19 @@ class TestGetSlurmOptionsConfigValidation:
     def test_config_cpus_per_task_bool_rejected(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": True}
         with patch("pytask_slurm.submit.get_marks", return_value=[]):
-            with pytest.raises(ValueError, match="must be an int, got bool"):
+            with pytest.raises(ValueError, match="Global config.*must be an int, got bool"):
                 _get_slurm_options(_FakeTask(), config)
 
     def test_config_mem_int_rejected(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_mem": 0}
         with patch("pytask_slurm.submit.get_marks", return_value=[]):
-            with pytest.raises(ValueError, match="must be a str, got int"):
+            with pytest.raises(ValueError, match="Global config.*must be a str, got int"):
                 _get_slurm_options(_FakeTask(), config)
 
     def test_config_time_empty_string_rejected(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_time": ""}
         with patch("pytask_slurm.submit.get_marks", return_value=[]):
-            with pytest.raises(ValueError, match="must not be an empty string"):
+            with pytest.raises(ValueError, match="Global config.*must not be an empty string"):
                 _get_slurm_options(_FakeTask(), config)
 
     def test_config_none_partition_allowed(self) -> None:
@@ -141,5 +143,5 @@ class TestGetSlurmOptionsConfigValidation:
     def test_invalid_config_caught_even_when_mark_overrides(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": True}
         with patch("pytask_slurm.submit.get_marks", return_value=[_mark(cpus_per_task=4)]):
-            with pytest.raises(ValueError, match="must be an int, got bool"):
+            with pytest.raises(ValueError, match="Global config.*must be an int, got bool"):
                 _get_slurm_options(_FakeTask(), config)

@@ -98,7 +98,7 @@ def run_task(payload_path: str, result_path: str) -> None:
     )
     if sys_path_file.exists():
         saved_path: list[str] = json.loads(sys_path_file.read_text())
-        for entry in saved_path:
+        for entry in reversed(saved_path):
             if entry not in sys.path:
                 sys.path.insert(0, entry)
 
