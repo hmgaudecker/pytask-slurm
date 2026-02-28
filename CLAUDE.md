@@ -11,7 +11,7 @@ pixi run pytest tests/test_submit.py  # run single test file
 pixi run pytest tests/test_submit.py::TestGetSlurmOptionsValidation::test_cpus_per_task_bool_rejected  # single test
 pixi run tests-with-cov       # tests with coverage
 pixi run ty                   # type check with ty
-prek run --all-files           # run all pre-commit hooks (ruff, pyproject-fmt, yamlfix, etc.)
+pixi run prek run --all-files  # run all pre-commit hooks (ruff, pyproject-fmt, yamlfix, etc.)
 pixi install                  # install/update dependencies and lock file
 ```
 

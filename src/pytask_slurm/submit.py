@@ -49,6 +49,36 @@ class TaskPayload:
     result_path: str
 
 
+def _validate_slurm_option(key: str, value: Any, task_name: str) -> None:
+    """Validate a single SLURM option value (type and range)."""
+    if key in _SLURM_INT_KEYS:
+        if isinstance(value, bool) or not isinstance(value, int):
+            msg = (
+                f"SLURM option {key!r} for task {task_name!r} "
+                f"must be an int, got {type(value).__name__}."
+            )
+            raise ValueError(msg)
+        if value <= 0:
+            msg = (
+                f"SLURM option {key!r} for task {task_name!r} "
+                f"must be a positive integer, got {value}."
+            )
+            raise ValueError(msg)
+    else:
+        if not isinstance(value, str):
+            msg = (
+                f"SLURM option {key!r} for task {task_name!r} "
+                f"must be a str, got {type(value).__name__}."
+            )
+            raise ValueError(msg)
+        if not value:
+            msg = (
+                f"SLURM option {key!r} for task {task_name!r} "
+                f"must not be an empty string."
+            )
+            raise ValueError(msg)
+
+
 def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str, Any]:
     """Build SLURM resource options by merging global defaults with per-task marks."""
     options = {
@@ -68,62 +98,39 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         )
         raise ValueError(msg)
 
-    if not marks:
-        return options
+    if marks:
+        mark = marks[0]
 
-    mark = marks[0]
-
-    if mark.args:
-        msg = (
-            f"@pytask.mark.slurm for task {task.name!r} received positional "
-            f"arguments {mark.args!r}. Use keyword arguments instead, e.g. "
-            f"@pytask.mark.slurm(partition='gpu')."
-        )
-        raise ValueError(msg)
-
-    unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
-    if unknown:
-        msg = (
-            f"Unknown @pytask.mark.slurm kwargs for task {task.name!r}: "
-            f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
-        )
-        raise ValueError(msg)
-
-    for key, value in mark.kwargs.items():
-        if value is None:
+        if mark.args:
             msg = (
-                f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                f"must not be None."
+                f"@pytask.mark.slurm for task {task.name!r} received positional "
+                f"arguments {mark.args!r}. Use keyword arguments instead, e.g. "
+                f"@pytask.mark.slurm(partition='gpu')."
             )
             raise ValueError(msg)
-        if key in _SLURM_INT_KEYS:
-            if isinstance(value, bool) or not isinstance(value, int):
-                msg = (
-                    f"@pytask.mark.slurm kwarg {key!r} for task "
-                    f"{task.name!r} must be an int, got {type(value).__name__}."
-                )
-                raise ValueError(msg)
-            if value <= 0:
-                msg = (
-                    f"@pytask.mark.slurm kwarg {key!r} for task "
-                    f"{task.name!r} must be a positive integer, got {value}."
-                )
-                raise ValueError(msg)
-        else:
-            if not isinstance(value, str):
+
+        unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
+        if unknown:
+            msg = (
+                f"Unknown @pytask.mark.slurm kwargs for task {task.name!r}: "
+                f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
+            )
+            raise ValueError(msg)
+
+        for key, value in mark.kwargs.items():
+            if value is None:
                 msg = (
                     f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                    f"must be a str, got {type(value).__name__}."
-                )
-                raise ValueError(msg)
-            if not value:
-                msg = (
-                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                    f"must not be an empty string."
+                    f"must not be None."
                 )
                 raise ValueError(msg)
 
-    options.update(mark.kwargs)
+        options.update(mark.kwargs)
+
+    # Validate all non-None values (partition/account may be None from config).
+    for key, value in options.items():
+        if value is not None:
+            _validate_slurm_option(key, value, task.name)
 
     return options
 

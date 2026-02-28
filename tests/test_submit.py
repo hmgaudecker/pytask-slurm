@@ -87,3 +87,31 @@ class TestGetSlurmOptionsValidation:
         assert result["time"] == "01:00:00"
         assert result["partition"] == "default"
         assert result["account"] == "myaccount"
+
+
+class TestGetSlurmOptionsConfigValidation:
+    """Validation of global config values (not just mark kwargs)."""
+
+    def test_config_cpus_per_task_bool_rejected(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": True}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            with pytest.raises(ValueError, match="must be an int, got bool"):
+                _get_slurm_options(_FakeTask(), config)
+
+    def test_config_mem_int_rejected(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_mem": 0}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            with pytest.raises(ValueError, match="must be a str, got int"):
+                _get_slurm_options(_FakeTask(), config)
+
+    def test_config_time_empty_string_rejected(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_time": ""}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            with pytest.raises(ValueError, match="must not be an empty string"):
+                _get_slurm_options(_FakeTask(), config)
+
+    def test_config_none_partition_allowed(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_partition": None}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            result = _get_slurm_options(_FakeTask(), config)
+        assert result["partition"] is None
