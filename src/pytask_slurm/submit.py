@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -21,9 +22,11 @@ from pytask_parallel.utils import (
 if TYPE_CHECKING:
     from pytask import PTask
 
-_SLURM_MARK_KEYS = frozenset({"partition", "time", "mem", "cpus_per_task", "account"})
+_SLURM_MARK_KEYS = frozenset(
+    {"partition", "time", "mem", "cpus_per_task", "account", "qos"}
+)
 _SLURM_INT_KEYS = frozenset({"cpus_per_task"})
-_NULLABLE_KEYS = frozenset({"partition", "account"})
+_NULLABLE_KEYS = frozenset({"partition", "account", "qos"})
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "mem": session_config["slurm_mem"],
         "cpus_per_task": session_config["slurm_cpus_per_task"],
         "account": session_config["slurm_account"],
+        "qos": session_config["slurm_qos"],
     }
 
     marks = get_marks(task, "slurm")
@@ -155,6 +159,47 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
             raise ValueError(msg)
 
     return options
+
+
+def _build_sbatch_cmd(
+    opts: dict[str, Any],
+    session_config: dict[str, Any],
+    task_hash: str,
+    paths: tuple[Path, Path, Path],
+) -> list[str]:
+    """Build the sbatch command list from task options and config.
+
+    *paths* is ``(log_path, payload_path, result_path)``.
+    """
+    log_path, payload_path, result_path = paths
+
+    cmd = [
+        "sbatch",
+        "--parsable",
+        f"--job-name=pytask-{task_hash}",
+        f"--time={opts['time']}",
+        f"--mem={opts['mem']}",
+        f"--cpus-per-task={opts['cpus_per_task']}",
+        f"--output={log_path}",
+    ]
+
+    if opts["partition"]:
+        cmd.append(f"--partition={opts['partition']}")
+    if opts["account"]:
+        cmd.append(f"--account={opts['account']}")
+    if opts["qos"]:
+        cmd.append(f"--qos={opts['qos']}")
+
+    extra = session_config["slurm_extra"]
+    if extra:
+        if not isinstance(extra, str):
+            msg = f"slurm_extra must be a string, got {type(extra).__name__}"
+            raise TypeError(msg)
+        cmd.extend(shlex.split(extra))
+
+    runner_cmd = f"{sys.executable} -m pytask_slurm.runner {payload_path} {result_path}"
+    cmd.append(f"--wrap={runner_cmd}")
+    return cmd
 
 
 def submit_task(
@@ -213,24 +258,9 @@ def submit_task(
 
     # Build sbatch command using merged per-task + global options.
     opts = _get_slurm_options(task, session_config)
-
-    cmd = [
-        "sbatch",
-        "--parsable",
-        f"--job-name=pytask-{task_hash}",
-        f"--time={opts['time']}",
-        f"--mem={opts['mem']}",
-        f"--cpus-per-task={opts['cpus_per_task']}",
-        f"--output={log_path}",
-    ]
-
-    if opts["partition"]:
-        cmd.append(f"--partition={opts['partition']}")
-    if opts["account"]:
-        cmd.append(f"--account={opts['account']}")
-
-    runner_cmd = f"{sys.executable} -m pytask_slurm.runner {payload_path} {result_path}"
-    cmd.append(f"--wrap={runner_cmd}")
+    cmd = _build_sbatch_cmd(
+        opts, session_config, task_hash, (log_path, payload_path, result_path)
+    )
 
     result = subprocess.run(  # noqa: S603
         cmd, capture_output=True, check=False, text=True, timeout=30

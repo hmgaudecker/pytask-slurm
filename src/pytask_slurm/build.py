@@ -54,5 +54,15 @@ def pytask_extend_command_line_interface(cli: click.Group) -> None:
             default=None,
             help="SLURM account.",
         ),
+        click.Option(
+            ["--slurm-qos"],
+            default=None,
+            help="SLURM quality-of-service.",
+        ),
+        click.Option(
+            ["--slurm-extra"],
+            default=None,
+            help="Extra sbatch flags (e.g. '--gres=gpu:1 --constraint=a100').",
+        ),
     ]
     cli.commands["build"].params.extend(additional_parameters)

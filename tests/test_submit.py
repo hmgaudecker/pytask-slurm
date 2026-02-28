@@ -16,6 +16,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_mem": "4G",
     "slurm_cpus_per_task": 1,
     "slurm_account": "myaccount",
+    "slurm_qos": None,
 }
 
 
@@ -169,3 +170,35 @@ class TestGetSlurmOptionsConfigValidation:
             ),
         ):
             _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+
+
+class TestQosOption:
+    def test_qos_from_config(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_qos": "high"}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        assert result["qos"] == "high"
+
+    def test_qos_none_allowed(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_qos": None}
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        assert result["qos"] is None
+
+    def test_qos_from_mark(self) -> None:
+        result = _call([_mark(qos="low")])
+        assert result["qos"] == "low"
+
+    def test_qos_mark_overrides_config(self) -> None:
+        config = {**_DEFAULT_CONFIG, "slurm_qos": "high"}
+        with patch("pytask_slurm.submit.get_marks", return_value=[_mark(qos="low")]):
+            result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        assert result["qos"] == "low"
+
+    def test_qos_non_string_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must be a str, got int"):
+            _call([_mark(qos=123)])
+
+    def test_qos_empty_string_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must not be an empty string"):
+            _call([_mark(qos="")])

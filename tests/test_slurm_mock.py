@@ -288,3 +288,128 @@ def test_unknown_mark_kwarg_raises(tmp_path: Path) -> None:
     assert isinstance(exc, ValueError)
     assert "Unknown @pytask.mark.slurm kwargs" in str(exc)
     assert "partitoin" in str(exc)
+
+
+def test_qos_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """--slurm-qos should appear in the sbatch command."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+        slurm_qos="high",
+    )
+
+    assert session.exit_code == ExitCode.OK
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--qos=high" in sbatch_line
+
+
+def test_extra_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """--slurm-extra should pass arbitrary flags to sbatch."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+        slurm_extra="--gres=gpu:1 --constraint=a100",
+    )
+
+    assert session.exit_code == ExitCode.OK
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--gres=gpu:1" in sbatch_line
+    assert "--constraint=a100" in sbatch_line
+
+
+def test_qos_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """@pytask.mark.slurm(qos=...) should override the global --slurm-qos."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        import pytask
+        from pytask import Product
+
+
+        @pytask.mark.slurm(qos="low")
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+        slurm_qos="high",
+    )
+
+    assert session.exit_code == ExitCode.OK
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    # The mark override should win.
+    assert "--qos=low" in sbatch_line
+
+
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_session_header(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """SLURM config summary should appear in session output."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    captured = capsys.readouterr()
+    assert "SLURM:" in captured.out

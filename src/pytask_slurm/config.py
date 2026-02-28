@@ -12,7 +12,7 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     """Parse the configuration."""
     config["markers"]["slurm"] = (
         "Override SLURM resources for a task"
-        " (partition, time, mem, cpus_per_task, account)."
+        " (partition, time, mem, cpus_per_task, account, qos)."
     )
     config.setdefault("slurm", False)
     config.setdefault("slurm_partition", None)
@@ -22,6 +22,8 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     config.setdefault("slurm_max_jobs", 100)
     config.setdefault("slurm_poll_interval", 5.0)
     config.setdefault("slurm_account", None)
+    config.setdefault("slurm_qos", None)
+    config.setdefault("slurm_extra", None)
 
 
 @hookimpl(trylast=True)
@@ -33,6 +35,7 @@ def pytask_post_parse(config: dict[str, Any]) -> None:
     if config["pdb"] or config["trace"] or config["dry_run"]:
         return
 
-    from pytask_slurm import execute  # noqa: PLC0415
+    from pytask_slurm import execute, logging  # noqa: PLC0415
 
     config["pm"].register(execute)
+    config["pm"].register(logging)
