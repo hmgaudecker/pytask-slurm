@@ -1,14 +1,15 @@
-"""Unit tests for pytask_slurm.submit._get_slurm_options."""
+"""Unit tests for pytask_slurm.submit."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from pytask import Mark
 
-from pytask_slurm.submit import _get_slurm_options
+from pytask_slurm.submit import _build_sbatch_cmd, _get_slurm_options
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_partition": "default",
@@ -202,3 +203,21 @@ class TestQosOption:
     def test_qos_empty_string_rejected(self) -> None:
         with pytest.raises(ValueError, match="must not be an empty string"):
             _call([_mark(qos="")])
+
+
+class TestBuildSbatchCmd:
+    """Tests for _build_sbatch_cmd."""
+
+    def test_slurm_extra_non_string_rejected(self, tmp_path: Path) -> None:
+        opts: dict[str, Any] = {
+            "partition": "default",
+            "time": "01:00:00",
+            "mem": "4G",
+            "cpus_per_task": 1,
+            "account": "myaccount",
+            "qos": None,
+        }
+        config = {**_DEFAULT_CONFIG, "slurm_extra": 42}
+        paths = (tmp_path / "log", tmp_path / "payload", tmp_path / "result")
+        with pytest.raises(TypeError, match="slurm_extra must be a string, got int"):
+            _build_sbatch_cmd(opts, config, "abc123", paths)

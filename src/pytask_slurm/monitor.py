@@ -99,7 +99,8 @@ def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
             text=True,
             timeout=30,
         )
-        return _parse_status_lines(result.stdout)
+        if result.returncode == 0:
+            return _parse_status_lines(result.stdout)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 

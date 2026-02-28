@@ -181,3 +181,18 @@ class TestSqueueFallback:
 
         assert result == {"1001": SlurmJobStatus.COMPLETED}
         mock_run.assert_called_once()
+
+    def test_falls_back_to_squeue_on_sacct_nonzero_exit(self) -> None:
+        squeue_stdout = "1001|RUNNING\n"
+        sacct_result = type(
+            "Result", (), {"stdout": "", "returncode": 1, "stderr": "error"}
+        )()
+        squeue_result = type("Result", (), {"stdout": squeue_stdout, "returncode": 0})()
+        with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
+            mock_run.side_effect = [sacct_result, squeue_result]
+            result = poll_job_statuses(["1001"])
+
+        assert result == {"1001": SlurmJobStatus.RUNNING}
+        assert mock_run.call_count == 2  # noqa: PLR2004
+        assert mock_run.call_args_list[0][0][0][0] == "sacct"
+        assert mock_run.call_args_list[1][0][0][0] == "squeue"
