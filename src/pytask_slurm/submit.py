@@ -22,6 +22,8 @@ from pytask_parallel.utils import strip_annotation_locals
 if TYPE_CHECKING:
     from pytask import PTask
 
+_SLURM_MARK_KEYS = frozenset({"partition", "time", "mem", "cpus_per_task", "account"})
+
 
 @dataclass(frozen=True)
 class SlurmJob:
@@ -45,6 +47,29 @@ class TaskPayload:
     show_locals: bool
     task_filterwarnings: tuple[Any, ...]
     result_path: str
+
+
+def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str, Any]:
+    """Build SLURM resource options by merging global defaults with per-task marks."""
+    options = {
+        "partition": session_config["slurm_partition"],
+        "time": session_config["slurm_time"],
+        "mem": session_config["slurm_mem"],
+        "cpus_per_task": session_config["slurm_cpus_per_task"],
+        "account": session_config["slurm_account"],
+    }
+
+    for mark in get_marks(task, "slurm"):
+        unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
+        if unknown:
+            msg = (
+                f"Unknown @pytask.mark.slurm kwargs for task {task.name!r}: "
+                f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
+            )
+            raise ValueError(msg)
+        options.update(mark.kwargs)
+
+    return options
 
 
 def submit_task(
@@ -101,21 +126,23 @@ def submit_task(
     with open(payload_path, "wb") as f:
         cloudpickle.dump(payload, f)
 
-    # Build sbatch command.
+    # Build sbatch command using merged per-task + global options.
+    opts = _get_slurm_options(task, session_config)
+
     cmd = [
         "sbatch",
         "--parsable",
         f"--job-name=pytask-{task_hash}",
-        f"--time={session_config['slurm_time']}",
-        f"--mem={session_config['slurm_mem']}",
-        f"--cpus-per-task={session_config['slurm_cpus_per_task']}",
+        f"--time={opts['time']}",
+        f"--mem={opts['mem']}",
+        f"--cpus-per-task={opts['cpus_per_task']}",
         f"--output={log_path}",
     ]
 
-    if session_config["slurm_partition"]:
-        cmd.append(f"--partition={session_config['slurm_partition']}")
-    if session_config["slurm_account"]:
-        cmd.append(f"--account={session_config['slurm_account']}")
+    if opts["partition"]:
+        cmd.append(f"--partition={opts['partition']}")
+    if opts["account"]:
+        cmd.append(f"--account={opts['account']}")
 
     runner_cmd = f"{sys.executable} -m pytask_slurm.runner {payload_path} {result_path}"
     cmd.append(f"--wrap={runner_cmd}")

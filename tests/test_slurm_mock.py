@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import textwrap
@@ -136,3 +137,66 @@ def test_task_with_dependency(tmp_path: Path, mock_slurm_env: Path) -> None:
 
     assert session.exit_code == ExitCode.OK
     assert tmp_path.joinpath("final.txt").read_text() == "data processed"
+
+
+def test_per_task_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """@pytask.mark.slurm(...) overrides should flow through to sbatch args."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        import pytask
+        from pytask import Product
+
+
+        @pytask.mark.slurm(mem="16G", time="02:00:00")
+        def task_custom(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("out.txt").read_text() == "done"
+
+    # Verify the sbatch args recorded by mock sbatch contain the overrides.
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    sbatch_args = list(jobs.values())[0]["sbatch_args"]
+    sbatch_line = " ".join(sbatch_args)
+    assert "--mem=16G" in sbatch_line
+    assert "--time=02:00:00" in sbatch_line
+
+
+def test_unknown_mark_kwarg_raises(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """Typos in @pytask.mark.slurm kwargs should produce a clear error."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        import pytask
+        from pytask import Product
+
+
+        @pytask.mark.slurm(partitoin="gpu")
+        def task_typo(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+    )
+
+    assert session.exit_code == ExitCode.FAILED

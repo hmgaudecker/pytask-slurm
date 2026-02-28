@@ -52,6 +52,7 @@ jobs[str(job_id)] = {
     "result_path": result_path,
     "log_path": log_path or "",
     "status": "RUNNING",
+    "sbatch_args": sys.argv[1:],
 }
 jobs_file.write_text(json.dumps(jobs))
 

@@ -10,6 +10,10 @@ from pytask import hookimpl
 @hookimpl
 def pytask_parse_config(config: dict[str, Any]) -> None:
     """Parse the configuration."""
+    config["markers"]["slurm"] = (
+        "Override SLURM resources for a task"
+        " (partition, time, mem, cpus_per_task, account)."
+    )
     config.setdefault("slurm", False)
     config.setdefault("slurm_partition", None)
     config.setdefault("slurm_time", "01:00:00")
