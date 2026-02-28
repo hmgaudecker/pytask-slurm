@@ -49,31 +49,33 @@ class TaskPayload:
     result_path: str
 
 
-def _validate_slurm_option(key: str, value: Any, task_name: str) -> None:
+def _validate_slurm_option(
+    key: str, value: Any, task_name: str, source: str = "SLURM option"
+) -> None:
     """Validate a single SLURM option value (type and range)."""
     if key in _SLURM_INT_KEYS:
         if isinstance(value, bool) or not isinstance(value, int):
             msg = (
-                f"SLURM option {key!r} for task {task_name!r} "
+                f"{source} {key!r} for task {task_name!r} "
                 f"must be an int, got {type(value).__name__}."
             )
             raise ValueError(msg)
         if value <= 0:
             msg = (
-                f"SLURM option {key!r} for task {task_name!r} "
+                f"{source} {key!r} for task {task_name!r} "
                 f"must be a positive integer, got {value}."
             )
             raise ValueError(msg)
     else:
         if not isinstance(value, str):
             msg = (
-                f"SLURM option {key!r} for task {task_name!r} "
+                f"{source} {key!r} for task {task_name!r} "
                 f"must be a str, got {type(value).__name__}."
             )
             raise ValueError(msg)
         if not value:
             msg = (
-                f"SLURM option {key!r} for task {task_name!r} "
+                f"{source} {key!r} for task {task_name!r} "
                 f"must not be an empty string."
             )
             raise ValueError(msg)
@@ -124,12 +126,16 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
                     f"must not be None."
                 )
                 raise ValueError(msg)
+            _validate_slurm_option(
+                key, value, task.name, source="@pytask.mark.slurm kwarg"
+            )
 
         options.update(mark.kwargs)
 
-    # Validate all non-None values (partition/account may be None from config).
+    # Validate config-only values (mark kwargs already validated above).
+    mark_keys = set(marks[0].kwargs) if marks else set()
     for key, value in options.items():
-        if value is not None:
+        if value is not None and key not in mark_keys:
             _validate_slurm_option(key, value, task.name)
 
     return options
