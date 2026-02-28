@@ -204,6 +204,7 @@ def test_unknown_mark_kwarg_raises(tmp_path: Path, mock_slurm_env: Path) -> None
     assert session.exit_code == ExitCode.FAILED
 
     # Verify the error is specifically a ValueError about the unknown kwarg.
+    # Note: relies on pytask's execution_reports / exc_info internals.
     failed = [r for r in session.execution_reports if r.exc_info and r.exc_info[1]]
     assert failed, "Expected at least one execution report with exception info"
     exc = failed[0].exc_info[1]

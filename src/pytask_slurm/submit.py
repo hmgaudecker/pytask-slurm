@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from pytask import PTask
 
 _SLURM_MARK_KEYS = frozenset({"partition", "time", "mem", "cpus_per_task", "account"})
+_SLURM_INT_KEYS = frozenset({"cpus_per_task"})
 
 
 @dataclass(frozen=True)
@@ -84,18 +85,32 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
                     f"must not be None."
                 )
                 raise ValueError(msg)
-            if key == "cpus_per_task" and not isinstance(value, int):
-                msg = (
-                    f"@pytask.mark.slurm kwarg 'cpus_per_task' for task "
-                    f"{task.name!r} must be an int, got {type(value).__name__}."
-                )
-                raise ValueError(msg)
-            if key != "cpus_per_task" and not isinstance(value, str):
-                msg = (
-                    f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
-                    f"must be a str, got {type(value).__name__}."
-                )
-                raise ValueError(msg)
+            if key in _SLURM_INT_KEYS:
+                if not isinstance(value, int):
+                    msg = (
+                        f"@pytask.mark.slurm kwarg {key!r} for task "
+                        f"{task.name!r} must be an int, got {type(value).__name__}."
+                    )
+                    raise ValueError(msg)
+                if value <= 0:
+                    msg = (
+                        f"@pytask.mark.slurm kwarg {key!r} for task "
+                        f"{task.name!r} must be a positive integer, got {value}."
+                    )
+                    raise ValueError(msg)
+            else:
+                if not isinstance(value, str):
+                    msg = (
+                        f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
+                        f"must be a str, got {type(value).__name__}."
+                    )
+                    raise ValueError(msg)
+                if not value:
+                    msg = (
+                        f"@pytask.mark.slurm kwarg {key!r} for task {task.name!r} "
+                        f"must not be an empty string."
+                    )
+                    raise ValueError(msg)
 
         options.update(mark.kwargs)
 
