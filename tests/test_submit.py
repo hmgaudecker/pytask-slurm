@@ -51,6 +51,10 @@ class TestGetSlurmOptionsValidation:
         with pytest.raises(ValueError, match="must be an int, got float"):
             _call([_mark(cpus_per_task=2.5)])
 
+    def test_cpus_per_task_string_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must be an int, got str"):
+            _call([_mark(cpus_per_task="4")])
+
     def test_string_key_with_non_string_value_rejected(self) -> None:
         with pytest.raises(ValueError, match="must be a str, got int"):
             _call([_mark(mem=16)])

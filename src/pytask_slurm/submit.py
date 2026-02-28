@@ -100,6 +100,12 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         )
         raise ValueError(msg)
 
+    # Validate all non-None config values upfront (catches invalid config even
+    # when a mark overrides the key, so misconfigurations don't go unnoticed).
+    for key, value in options.items():
+        if value is not None:
+            _validate_slurm_option(key, value, task.name)
+
     if marks:
         mark = marks[0]
 
@@ -131,12 +137,6 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
             )
 
         options.update(mark.kwargs)
-
-    # Validate config-only values (mark kwargs already validated above).
-    mark_keys = set(marks[0].kwargs) if marks else set()
-    for key, value in options.items():
-        if value is not None and key not in mark_keys:
-            _validate_slurm_option(key, value, task.name)
 
     # time, mem, and cpus_per_task are always passed to sbatch unconditionally,
     # so they must not be None after merging.
