@@ -149,7 +149,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
     # time, mem, and cpus_per_task are always passed to sbatch unconditionally,
     # so they must not be None after merging.  partition and account are
     # optional (only appended when truthy), so None is valid for them.
-    for key in ("time", "mem", "cpus_per_task"):
+    for key in _SLURM_MARK_KEYS - _NULLABLE_KEYS:
         if options[key] is None:
             msg = f"SLURM option {key!r} for task {task.name!r} must not be None."
             raise ValueError(msg)
