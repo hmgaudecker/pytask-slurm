@@ -48,6 +48,10 @@ class TaskPayload:
     show_locals: bool
     task_filterwarnings: list[Any]
     result_path: str
+    # Kept for backward compatibility: in-flight jobs serialized before the
+    # switch to a JSON sidecar file included sys_path in the payload.  The
+    # runner now reads the sidecar instead, so this field is ignored.
+    sys_path: list[str] | None = None
 
 
 def _validate_slurm_option(
