@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import cloudpickle
 from _pytask.node_protocols import PPathNode
 from pytask import ExecutionReport, PNode, PythonNode, Session, hookimpl
-from pytask.tree_util import tree_map, tree_structure
+from pytask.tree_util import tree_leaves, tree_map, tree_structure
 from pytask_parallel.typing import CarryOverPath
 
 from pytask_slurm.cancel import cancel_jobs
@@ -307,6 +307,17 @@ def _process_completed_job(
         )
 
     _update_carry_over_products(task, wrapper_result.carry_over_products)
+
+    # Refresh NFS cache for directories containing products.  The SLURM
+    # worker writes product files on a compute node; the NFS attribute
+    # cache on the login node may not yet reflect these writes.
+    _refreshed: set[Path] = set()
+    for node in tree_leaves(task.produces):
+        if isinstance(node, PPathNode):
+            parent = node.path.parent
+            if parent not in _refreshed:
+                _refresh_nfs_cache(parent)
+                _refreshed.add(parent)
 
     try:
         session.hook.pytask_execute_task_teardown(session=session, task=task)
