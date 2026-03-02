@@ -175,6 +175,7 @@ _GENERATED_SBATCH_FLAGS = frozenset(
     {
         "--wrap",
         "--output",
+        "--error",
         "--job-name",
         "--time",
         "--mem",
@@ -190,6 +191,7 @@ _GENERATED_SBATCH_FLAGS = frozenset(
 # conflicts regardless of which form the user passes.
 _SHORT_TO_LONG: dict[str, str] = {
     "-o": "--output",
+    "-e": "--error",
     "-J": "--job-name",
     "-t": "--time",
     "-c": "--cpus-per-task",
@@ -249,6 +251,7 @@ def _build_sbatch_cmd(
         f"--mem={opts['mem']}",
         f"--cpus-per-task={opts['cpus_per_task']}",
         f"--output={log_path}",
+        f"--error={log_path}",
     ]
 
     if opts["partition"]:

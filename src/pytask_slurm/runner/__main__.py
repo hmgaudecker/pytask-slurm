@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import sys
-
-from pytask_slurm.runner import run_task
+import traceback
 
 _EXPECTED_ARGC = 3
 
@@ -15,4 +14,11 @@ if len(sys.argv) != _EXPECTED_ARGC:
     )
     sys.exit(1)
 
-run_task(sys.argv[1], sys.argv[2])
+try:
+    from pytask_slurm.runner import run_task
+
+    run_task(sys.argv[1], sys.argv[2])
+except Exception:  # noqa: BLE001
+    # Ensure any crash (including import errors) is visible in the SLURM log.
+    traceback.print_exc()
+    sys.exit(2)
