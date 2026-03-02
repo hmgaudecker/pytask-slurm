@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -15,7 +16,7 @@ from pytask.tree_util import tree_map, tree_structure
 from pytask_parallel.typing import CarryOverPath
 
 from pytask_slurm.cancel import cancel_jobs
-from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
+from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus, poll_job_statuses
 from pytask_slurm.submit import SlurmJob, submit_task
 
 if TYPE_CHECKING:
@@ -25,6 +26,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PENDING_STATUSES = frozenset({SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING})
+
+
+def _refresh_nfs_cache(directory: Path) -> None:
+    """Force NFS attribute cache refresh by listing the directory.
+
+    On shared filesystems, recently-written files may not be visible to the
+    login node immediately. Calling ``os.listdir()`` triggers a metadata
+    lookup that invalidates the NFS attribute cache for the directory.
+    """
+    try:
+        os.listdir(directory)
+    except OSError:
+        pass
 
 
 @hookimpl
@@ -184,22 +198,34 @@ def _collect_completed_jobs(
 
     newly_collected: list[ExecutionReport] = []
     job_id_to_name = {j.job_id: name for name, j in running_jobs.items()}
-    statuses = poll_job_statuses(list(job_id_to_name))
+    results = poll_job_statuses(list(job_id_to_name))
     completed_task_names: list[str] = []
 
-    for job_id, status in statuses.items():
+    # Refresh NFS cache once before reading any result/log files.
+    work_dirs_refreshed: set[Path] = set()
+    for task_name in running_jobs:
+        slurm_job = running_jobs[task_name]
+        parent = slurm_job.result_path.parent
+        if parent not in work_dirs_refreshed:
+            _refresh_nfs_cache(parent)
+            work_dirs_refreshed.add(parent)
+
+    for job_id, job_result in results.items():
         task_name = job_id_to_name.get(job_id)
         if task_name is None:
             continue
         slurm_job = running_jobs[task_name]
-        if not _is_actionable_status(status, slurm_job, unknown_timeout):
+        if not _is_actionable_status(job_result.status, slurm_job, unknown_timeout):
             continue
 
         task = session.dag.nodes[task_name]["task"]
-        if status == SlurmJobStatus.COMPLETED:
-            report = _process_completed_job(session, task, slurm_job)
+        if job_result.status == SlurmJobStatus.COMPLETED:
+            if job_result.exit_code is not None and job_result.exit_code != 0:
+                report = _process_nonzero_exit(task, slurm_job, job_result.exit_code)
+            else:
+                report = _process_completed_job(session, task, slurm_job)
         else:
-            report = _process_failed_job(task, slurm_job, status)
+            report = _process_failed_job(task, slurm_job, job_result.status)
 
         newly_collected.append(report)
         completed_task_names.append(task_name)
@@ -208,7 +234,7 @@ def _collect_completed_jobs(
     # (e.g. sacct is unavailable and the job finished so squeue no longer
     # lists it), check whether the result pickle exists.
     fallback_reports, fallback_names = _check_result_file_fallback(
-        session, running_jobs, set(statuses), set(completed_task_names)
+        session, running_jobs, set(results), set(completed_task_names)
     )
     newly_collected.extend(fallback_reports)
     completed_task_names.extend(fallback_names)
@@ -288,6 +314,34 @@ def _process_completed_job(
         return ExecutionReport.from_task_and_exception(task, sys.exc_info())
 
     return ExecutionReport.from_task(task)
+
+
+def _process_nonzero_exit(
+    task: PTask,
+    slurm_job: SlurmJob,
+    exit_code: int,
+) -> ExecutionReport:
+    """Build a failure report for a job that SLURM reports as COMPLETED but exited non-zero."""
+    log_content = ""
+    try:
+        if slurm_job.log_path.exists():
+            log_content = slurm_job.log_path.read_text(errors="replace")[-4000:]
+    except OSError:
+        pass
+
+    msg = (
+        f"SLURM job {slurm_job.job_id} for task {slurm_job.task_name!r} "
+        f"reported COMPLETED but exited with code {exit_code}"
+    )
+    if log_content:
+        msg += f"\n\nSLURM log (last 4000 chars):\n{log_content}"
+    else:
+        msg += "\n\nSLURM log is empty — the worker process may have crashed at startup."
+
+    exc = RuntimeError(msg)
+    return ExecutionReport.from_task_and_exception(
+        task, (type(exc), exc, exc.__traceback__)
+    )
 
 
 def _process_failed_job(

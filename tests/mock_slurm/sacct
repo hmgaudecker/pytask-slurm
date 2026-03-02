@@ -23,7 +23,7 @@ if not jobs_file.exists():
 
 jobs = json.loads(jobs_file.read_text())
 
-# Output in sacct --parsable2 --noheader --format=JobIDRaw,State format.
+# Output in sacct --parsable2 --noheader --format=JobIDRaw,State,ExitCode format.
 for job_id in requested_ids:
     job = jobs.get(job_id.strip())
     if job is None:
@@ -32,6 +32,7 @@ for job_id in requested_ids:
     result_path = job.get("result_path", "")
     if result_path and Path(result_path).exists():
         status = "COMPLETED"
+        exit_code = "0:0"
     else:
         # Check if the process is still running.
         pid = job.get("pid")
@@ -39,10 +40,13 @@ for job_id in requested_ids:
             try:
                 os.kill(int(pid), 0)
                 status = "RUNNING"
+                exit_code = "0:0"
             except OSError:
                 # Process finished but no result file -- FAILED.
                 status = "FAILED"
+                exit_code = "1:0"
         else:
             status = "RUNNING"
+            exit_code = "0:0"
 
-    print(f"{job_id.strip()}|{status}")
+    print(f"{job_id.strip()}|{status}|{exit_code}")

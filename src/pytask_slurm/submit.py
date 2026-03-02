@@ -239,13 +239,23 @@ def _write_batch_script(
     Using a script file instead of ``--wrap`` avoids quoting issues and lets us
     redirect stderr to stdout within the script so that all output (including
     Python tracebacks) ends up in the single ``--output`` log file.
+
+    The script prints diagnostic lines before and after the Python command so
+    the log file is never empty — even if Python fails to start.
     """
+    q_python = shlex.quote(python)
+    q_payload = shlex.quote(str(payload_path))
+    q_result = shlex.quote(str(result_path))
     script_path.write_text(
         f"#!/bin/bash\n"
         f"# pytask-slurm batch script (auto-generated)\n"
         f"exec 2>&1\n"
-        f"exec {shlex.quote(python)} -m pytask_slurm.runner"
-        f" {shlex.quote(str(payload_path))} {shlex.quote(str(result_path))}\n"
+        f'echo "pytask-slurm: starting (pid=$$, host=$(hostname))"\n'
+        f'echo "pytask-slurm: python={q_python}"\n'
+        f"{q_python} -m pytask_slurm.runner {q_payload} {q_result}\n"
+        f"_exit_code=$?\n"
+        f'echo "pytask-slurm: runner exited with code $_exit_code"\n'
+        f"exit $_exit_code\n"
     )
     script_path.chmod(0o755)
 
