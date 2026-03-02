@@ -252,7 +252,7 @@ def _sbatch_cmd(
         opts or _FULL_OPTS,
         config,
         "abc123",
-        (tmp_path / "log", tmp_path / "p", tmp_path / "r"),
+        (tmp_path / "log", tmp_path / "p", tmp_path / "r", tmp_path / "job.sh"),
     )
 
 
@@ -270,7 +270,7 @@ class TestBuildSbatchCmd:
         assert "--partition=gpu" in cmd
         assert "--account=research" in cmd
         assert "--qos=high" in cmd
-        assert any(flag.startswith("--wrap=") for flag in cmd)
+        assert cmd[-1] == str(tmp_path / "job.sh")
 
     def test_none_optional_fields_omitted(self, tmp_path: Path) -> None:
         opts = {**_FULL_OPTS, "partition": None, "account": None, "qos": None}
@@ -295,7 +295,12 @@ class TestBuildSbatchCmd:
             "gpus": None,
         }
         config = {**_DEFAULT_CONFIG, "slurm_extra": 42}
-        paths = (tmp_path / "log", tmp_path / "payload", tmp_path / "result")
+        paths = (
+            tmp_path / "log",
+            tmp_path / "payload",
+            tmp_path / "result",
+            tmp_path / "job.sh",
+        )
         with pytest.raises(TypeError, match="slurm_extra must be a string, got int"):
             _build_sbatch_cmd(opts, config, "abc123", paths)
 
@@ -303,8 +308,8 @@ class TestBuildSbatchCmd:
 class TestWarnOnConflictingExtra:
     def test_warns_on_generated_flag(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--wrap=something"])
-        assert "--wrap" in caplog.text
+            _warn_on_conflicting_extra(["--output=/tmp/out.log"])
+        assert "--output" in caplog.text
         assert "conflicts" in caplog.text
 
     def test_no_warning_for_unrelated_flag(

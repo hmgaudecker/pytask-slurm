@@ -173,9 +173,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
 # that both the dedicated option and --slurm-extra are active.
 _GENERATED_SBATCH_FLAGS = frozenset(
     {
-        "--wrap",
         "--output",
-        "--error",
         "--job-name",
         "--time",
         "--mem",
@@ -191,7 +189,6 @@ _GENERATED_SBATCH_FLAGS = frozenset(
 # conflicts regardless of which form the user passes.
 _SHORT_TO_LONG: dict[str, str] = {
     "-o": "--output",
-    "-e": "--error",
     "-J": "--job-name",
     "-t": "--time",
     "-c": "--cpus-per-task",
@@ -231,17 +228,39 @@ def _warn_on_conflicting_extra(tokens: list[str]) -> None:
             )
 
 
+def _write_batch_script(
+    python: str,
+    payload_path: Path,
+    result_path: Path,
+    script_path: Path,
+) -> None:
+    """Write a SLURM batch script that runs the pytask runner.
+
+    Using a script file instead of ``--wrap`` avoids quoting issues and lets us
+    redirect stderr to stdout within the script so that all output (including
+    Python tracebacks) ends up in the single ``--output`` log file.
+    """
+    script_path.write_text(
+        f"#!/bin/bash\n"
+        f"# pytask-slurm batch script (auto-generated)\n"
+        f"exec 2>&1\n"
+        f"exec {shlex.quote(python)} -m pytask_slurm.runner"
+        f" {shlex.quote(str(payload_path))} {shlex.quote(str(result_path))}\n"
+    )
+    script_path.chmod(0o755)
+
+
 def _build_sbatch_cmd(
     opts: dict[str, Any],
     session_config: dict[str, Any],
     task_hash: str,
-    paths: tuple[Path, Path, Path],
+    paths: tuple[Path, Path, Path, Path],
 ) -> list[str]:
     """Build the sbatch command list from task options and config.
 
-    *paths* is ``(log_path, payload_path, result_path)``.
+    *paths* is ``(log_path, payload_path, result_path, script_path)``.
     """
-    log_path, payload_path, result_path = paths
+    log_path, _payload_path, _result_path, script_path = paths
 
     cmd = [
         "sbatch",
@@ -251,7 +270,6 @@ def _build_sbatch_cmd(
         f"--mem={opts['mem']}",
         f"--cpus-per-task={opts['cpus_per_task']}",
         f"--output={log_path}",
-        f"--error={log_path}",
     ]
 
     if opts["partition"]:
@@ -272,11 +290,7 @@ def _build_sbatch_cmd(
         _warn_on_conflicting_extra(extra_tokens)
         cmd.extend(extra_tokens)
 
-    runner_cmd = (
-        f"{shlex.quote(str(sys.executable))} -m pytask_slurm.runner"
-        f" {shlex.quote(str(payload_path))} {shlex.quote(str(result_path))}"
-    )
-    cmd.append(f"--wrap={runner_cmd}")
+    cmd.append(str(script_path))
     return cmd
 
 
@@ -334,10 +348,16 @@ def submit_task(
     with payload_path.open("wb") as f:
         cloudpickle.dump(payload, f)
 
-    # Build sbatch command using merged per-task + global options.
+    # Write batch script and build sbatch command.
+    script_path = work_dir / f"{task_hash}_job.sh"
+    _write_batch_script(sys.executable, payload_path, result_path, script_path)
+
     opts = _get_slurm_options(task, session_config)
     cmd = _build_sbatch_cmd(
-        opts, session_config, task_hash, (log_path, payload_path, result_path)
+        opts,
+        session_config,
+        task_hash,
+        (log_path, payload_path, result_path, script_path),
     )
 
     result = subprocess.run(  # noqa: S603
