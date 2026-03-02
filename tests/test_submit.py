@@ -23,6 +23,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_cpus_per_task": 1,
     "slurm_account": "myaccount",
     "slurm_qos": None,
+    "slurm_gpus": None,
 }
 
 
@@ -210,6 +211,26 @@ class TestQosOption:
             _call([_mark(qos="")])
 
 
+class TestGpusOption:
+    def test_gpus_accepted(self) -> None:
+        result = _call([_mark(gpus=1)])
+        assert result["gpus"] == 1
+
+    def test_gpus_zero_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must be a positive integer, got 0"):
+            _call([_mark(gpus=0)])
+
+    def test_gpus_none_omits_flag(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "gpus": None}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert not any(f.startswith("--gpus=") for f in cmd)
+
+    def test_gpus_present_in_sbatch(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "gpus": 2}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--gpus=2" in cmd
+
+
 _FULL_OPTS: dict[str, Any] = {
     "partition": "gpu",
     "time": "02:00:00",
@@ -217,6 +238,7 @@ _FULL_OPTS: dict[str, Any] = {
     "cpus_per_task": 4,
     "account": "research",
     "qos": "high",
+    "gpus": None,
 }
 
 
@@ -270,6 +292,7 @@ class TestBuildSbatchCmd:
             "cpus_per_task": 1,
             "account": "myaccount",
             "qos": None,
+            "gpus": None,
         }
         config = {**_DEFAULT_CONFIG, "slurm_extra": 42}
         paths = (tmp_path / "log", tmp_path / "payload", tmp_path / "result")

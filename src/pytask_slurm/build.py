@@ -62,6 +62,12 @@ def pytask_extend_command_line_interface(cli: click.Group) -> None:
             help="SLURM quality-of-service.",
         ),
         click.Option(
+            ["--slurm-gpus"],
+            default=None,
+            type=int,
+            help="GPUs per task.",
+        ),
+        click.Option(
             ["--slurm-extra"],
             default=None,
             help="Extra sbatch flags (e.g. '--gres=gpu:1 --constraint=a100').",

@@ -14,7 +14,7 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     """Parse the configuration."""
     config["markers"]["slurm"] = (
         "Override SLURM resources for a task"
-        " (partition, time, mem, cpus_per_task, account, qos)."
+        " (partition, time, mem, cpus_per_task, account, qos, gpus)."
     )
     config.setdefault("slurm", False)
     config.setdefault("slurm_partition", None)
@@ -25,6 +25,7 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     config.setdefault("slurm_poll_interval", 5.0)
     config.setdefault("slurm_account", None)
     config.setdefault("slurm_qos", None)
+    config.setdefault("slurm_gpus", None)
     config.setdefault("slurm_extra", None)
     config.setdefault("slurm_unknown_timeout", _DEFAULT_UNKNOWN_TIMEOUT)
 

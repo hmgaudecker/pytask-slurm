@@ -27,10 +27,10 @@ if TYPE_CHECKING:
     from pytask import PTask
 
 _SLURM_MARK_KEYS = frozenset(
-    {"partition", "time", "mem", "cpus_per_task", "account", "qos"}
+    {"partition", "time", "mem", "cpus_per_task", "account", "qos", "gpus"}
 )
-_SLURM_INT_KEYS = frozenset({"cpus_per_task"})
-_NULLABLE_KEYS = frozenset({"partition", "account", "qos"})
+_SLURM_INT_KEYS = frozenset({"cpus_per_task", "gpus"})
+_NULLABLE_KEYS = frozenset({"partition", "account", "qos", "gpus"})
 
 
 @dataclass(frozen=True)
@@ -135,6 +135,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "cpus_per_task": session_config["slurm_cpus_per_task"],
         "account": session_config["slurm_account"],
         "qos": session_config["slurm_qos"],
+        "gpus": session_config["slurm_gpus"],
     }
 
     marks = get_marks(task, "slurm")
@@ -181,6 +182,7 @@ _GENERATED_SBATCH_FLAGS = frozenset(
         "--partition",
         "--account",
         "--qos",
+        "--gpus",
     }
 )
 
@@ -194,6 +196,7 @@ _SHORT_TO_LONG: dict[str, str] = {
     "-p": "--partition",
     "-A": "--account",
     "-q": "--qos",
+    "-G": "--gpus",
 }
 
 
@@ -254,6 +257,8 @@ def _build_sbatch_cmd(
         cmd.append(f"--account={opts['account']}")
     if opts["qos"]:
         cmd.append(f"--qos={opts['qos']}")
+    if opts["gpus"]:
+        cmd.append(f"--gpus={opts['gpus']}")
 
     extra = session_config["slurm_extra"]
     if extra:
