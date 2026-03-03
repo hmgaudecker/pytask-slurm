@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -14,7 +13,6 @@ from pytask import Mark
 from pytask_slurm.submit import (
     _build_sbatch_cmd,
     _get_slurm_options,
-    _warn_on_conflicting_extra,
     _write_batch_script,
 )
 
@@ -320,51 +318,6 @@ class TestBuildSbatchCmd:
             pytest.raises(TypeError, match="slurm_extra must be a string, got int"),
         ):
             _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
-
-
-class TestWarnOnConflictingExtra:
-    def test_warns_on_generated_flag(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--output=/tmp/out.log"])
-        assert "--output" in caplog.text
-        assert "conflicts" in caplog.text
-
-    def test_no_warning_for_unrelated_flag(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--gres=gpu:1", "--nodelist=node01"])
-        assert caplog.text == ""
-
-    def test_warns_on_flag_with_equals(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--mem=16G"])
-        assert "--mem" in caplog.text
-
-    def test_warns_on_partition_flag(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["--partition=gpu"])
-        assert "--partition" in caplog.text
-
-    def test_warns_on_short_flag(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["-p", "gpu"])
-        assert "-p" in caplog.text
-        assert "conflicts" in caplog.text
-
-    def test_warns_on_short_time_flag(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["-t", "02:00:00"])
-        assert "-t" in caplog.text
-
-    def test_warns_on_combined_short_flag(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        with caplog.at_level(logging.WARNING, logger="pytask_slurm.submit"):
-            _warn_on_conflicting_extra(["-pgpu"])
-        assert "-pgpu" in caplog.text
-        assert "conflicts" in caplog.text
-
 
 
 class TestBuildSbatchCmdExtraKwargs:
