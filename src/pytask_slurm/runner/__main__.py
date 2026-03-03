@@ -19,6 +19,6 @@ try:
 
     run_task(sys.argv[1], sys.argv[2])
 except Exception:  # noqa: BLE001
-    # Ensure any crash (including import errors) is visible in the SLURM log.
+    # Ensure any crash is visible in the SLURM log.
     traceback.print_exc()
     sys.exit(2)

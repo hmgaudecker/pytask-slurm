@@ -340,7 +340,7 @@ def _process_nonzero_exit(
     slurm_job: SlurmJob,
     exit_code: int,
 ) -> ExecutionReport:
-    """Build a failure report for a job that SLURM reports as COMPLETED but exited non-zero."""
+    """Build a report for a job that SLURM reports as COMPLETED but exited non-zero."""
     log_content = _read_log_tail(slurm_job.log_path)
 
     msg = (

@@ -52,9 +52,6 @@ class TaskPayload:
     show_locals: bool
     task_filterwarnings: list[Any]
     result_path: str
-    # TODO(v1.0): Remove this field.  It existed before the JSON sidecar
-    # switch; the runner now reads sys_path from the sidecar instead.
-    sys_path: list[str] | None = None
 
 
 def _validate_slurm_option(
@@ -299,7 +296,6 @@ def submit_task(
     with payload_path.open("wb") as f:
         cloudpickle.dump(payload, f)
 
-    # Write batch script and build sbatch command.
     script_path = work_dir / f"{task_hash}_job.sh"
     _write_batch_script(sys.executable, payload_path, result_path, script_path)
 
