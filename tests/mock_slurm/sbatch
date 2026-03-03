@@ -82,6 +82,10 @@ proc = subprocess.Popen(
     stderr=log_fh,
 )
 
+# Close the log file handle so the child process owns it exclusively.
+if log_fh is not subprocess.DEVNULL:
+    log_fh.close()
+
 # Store pid so we could cancel it.
 jobs[str(job_id)]["pid"] = str(proc.pid)
 jobs_file.write_text(json.dumps(jobs))

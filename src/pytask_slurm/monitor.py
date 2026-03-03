@@ -62,7 +62,7 @@ def _parse_exit_code(raw: str) -> int | None:
 
     Returns ``None`` if the format is unrecognised.
     """
-    if not raw or raw == "":
+    if not raw:
         return None
     code_part = raw.split(":")[0]
     try:

@@ -322,6 +322,37 @@ def test_qos_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
     assert "--qos=high" in sbatch_line
 
 
+def test_gpus_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """--slurm-gpus should appear in the sbatch command."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+        slurm_gpus=2,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--gpus=2" in sbatch_line
+
+
 def test_extra_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
     """--slurm-extra should pass arbitrary flags to sbatch."""
     source = textwrap.dedent("""\

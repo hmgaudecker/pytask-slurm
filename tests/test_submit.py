@@ -223,26 +223,6 @@ class TestQosOption:
             _call([_mark(qos="")])
 
 
-class TestGpusOption:
-    def test_gpus_accepted(self) -> None:
-        result = _call([_mark(gpus=1)])
-        assert result["gpus"] == 1
-
-    def test_gpus_zero_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be a positive integer, got 0"):
-            _call([_mark(gpus=0)])
-
-    def test_gpus_none_omits_flag(self, tmp_path: Path) -> None:
-        opts = {**_FULL_OPTS, "gpus": None}
-        cmd = _sbatch_cmd(tmp_path, opts=opts)
-        assert not any(f.startswith("--gpus=") for f in cmd)
-
-    def test_gpus_present_in_sbatch(self, tmp_path: Path) -> None:
-        opts = {**_FULL_OPTS, "gpus": 2}
-        cmd = _sbatch_cmd(tmp_path, opts=opts)
-        assert "--gpus=2" in cmd
-
-
 _FULL_OPTS: dict[str, Any] = {
     "partition": "gpu",
     "time": "02:00:00",
@@ -264,8 +244,29 @@ def _sbatch_cmd(
         opts or _FULL_OPTS,
         config,
         "abc123",
-        (tmp_path / "log", tmp_path / "p", tmp_path / "r", tmp_path / "job.sh"),
+        log_path=tmp_path / "log",
+        script_path=tmp_path / "job.sh",
     )
+
+
+class TestGpusOption:
+    def test_gpus_accepted(self) -> None:
+        result = _call([_mark(gpus=1)])
+        assert result["gpus"] == 1
+
+    def test_gpus_zero_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must be a positive integer, got 0"):
+            _call([_mark(gpus=0)])
+
+    def test_gpus_none_omits_flag(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "gpus": None}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert not any(f.startswith("--gpus=") for f in cmd)
+
+    def test_gpus_present_in_sbatch(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "gpus": 2}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--gpus=2" in cmd
 
 
 class TestBuildSbatchCmd:
@@ -307,14 +308,14 @@ class TestBuildSbatchCmd:
             "gpus": None,
         }
         config = {**_DEFAULT_CONFIG, "slurm_extra": 42}
-        paths = (
-            tmp_path / "log",
-            tmp_path / "payload",
-            tmp_path / "result",
-            tmp_path / "job.sh",
-        )
         with pytest.raises(TypeError, match="slurm_extra must be a string, got int"):
-            _build_sbatch_cmd(opts, config, "abc123", paths)
+            _build_sbatch_cmd(
+                opts,
+                config,
+                "abc123",
+                log_path=tmp_path / "log",
+                script_path=tmp_path / "job.sh",
+            )
 
 
 class TestWarnOnConflictingExtra:
