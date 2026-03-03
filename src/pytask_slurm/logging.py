@@ -11,7 +11,9 @@ from pytask import Session, console, hookimpl
 def pytask_log_session_header(session: Session) -> None:
     """Print a summary of SLURM settings."""
     config: dict[str, Any] = session.config
-    parts = [f"partition={config['slurm_partition'] or 'default'}"]
+    parts: list[str] = []
+    if config["slurm_partition"] is not None:
+        parts.append(f"partition={config['slurm_partition']}")
     if config["slurm_time"] is not None:
         parts.append(f"time={config['slurm_time']}")
     if config["slurm_mem"] is not None:
@@ -20,7 +22,8 @@ def pytask_log_session_header(session: Session) -> None:
         parts.append(f"cpus_per_task={config['slurm_cpus_per_task']}")
     if config["slurm_gpus"] is not None:
         parts.append(f"gpus={config['slurm_gpus']}")
-    parts.append(f"max_jobs={config['slurm_max_jobs']}")
+    if config["slurm_max_jobs"] is not None:
+        parts.append(f"max_jobs={config['slurm_max_jobs']}")
     if config["slurm_account"] is not None:
         parts.append(f"account={config['slurm_account']}")
     if config["slurm_qos"] is not None:

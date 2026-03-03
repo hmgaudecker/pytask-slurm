@@ -6,7 +6,7 @@ from typing import Any
 
 from pytask import hookimpl
 
-_DEFAULT_UNKNOWN_TIMEOUT = 600
+_REQUIRED_EXECUTOR_OPTIONS = ("slurm_poll_interval", "slurm_max_jobs", "slurm_unknown_timeout")
 
 
 @hookimpl
@@ -19,16 +19,16 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     )
     config.setdefault("slurm", False)
     config.setdefault("slurm_partition", None)
-    config.setdefault("slurm_time", "01:00:00")
-    config.setdefault("slurm_mem", "4G")
-    config.setdefault("slurm_cpus_per_task", 1)
-    config.setdefault("slurm_max_jobs", 100)
-    config.setdefault("slurm_poll_interval", 5.0)
+    config.setdefault("slurm_time", None)
+    config.setdefault("slurm_mem", None)
+    config.setdefault("slurm_cpus_per_task", None)
+    config.setdefault("slurm_max_jobs", None)
+    config.setdefault("slurm_poll_interval", None)
     config.setdefault("slurm_account", None)
     config.setdefault("slurm_qos", None)
     config.setdefault("slurm_gpus", None)
     config.setdefault("slurm_extra", None)
-    config.setdefault("slurm_unknown_timeout", _DEFAULT_UNKNOWN_TIMEOUT)
+    config.setdefault("slurm_unknown_timeout", None)
 
 
 @hookimpl(trylast=True)
@@ -36,6 +36,15 @@ def pytask_post_parse(config: dict[str, Any]) -> None:
     """Register the SLURM executor if --slurm is active."""
     if not config["slurm"]:
         return
+
+    missing = [key for key in _REQUIRED_EXECUTOR_OPTIONS if config.get(key) is None]
+    if missing:
+        formatted = ", ".join(missing)
+        msg = (
+            f"SLURM is enabled but the following required options are not set: "
+            f"{formatted}. Set them in [tool.pytask.ini_options] in pyproject.toml."
+        )
+        raise ValueError(msg)
 
     if config["pdb"] or config["trace"] or config["dry_run"]:
         return

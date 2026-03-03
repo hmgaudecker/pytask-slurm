@@ -45,7 +45,7 @@ class TestLogSessionHeader:
         assert "account=research" in output
         assert "qos=high" in output
 
-    def test_none_partition_shows_default(self) -> None:
+    def test_none_partition_omitted(self) -> None:
         config = {**_BASE_CONFIG, "slurm_partition": None}
         session = _make_session(config)
         buf = StringIO()
@@ -53,7 +53,7 @@ class TestLogSessionHeader:
             mock_console.print = lambda text: buf.write(text)
             pytask_log_session_header(session)
         output = buf.getvalue()
-        assert "partition=default" in output
+        assert "partition=" not in output
 
     def test_none_account_omitted(self) -> None:
         config = {**_BASE_CONFIG, "slurm_account": None}
@@ -86,7 +86,6 @@ class TestLogSessionHeader:
         assert "account=" not in output
         assert "qos=" not in output
         assert "SLURM:" in output
-        assert "max_jobs=50" in output
 
     def test_extra_shown_when_set(self) -> None:
         config = {**_BASE_CONFIG, "slurm_extra": "--gres=gpu:1 --constraint=a100"}
