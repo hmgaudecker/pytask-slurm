@@ -13,6 +13,7 @@ from pytask import Mark
 from pytask_slurm.submit import (
     _build_sbatch_cmd,
     _get_slurm_options,
+    _validate_extra_option,
     _warn_on_conflicting_extra,
 )
 
@@ -92,8 +93,19 @@ class TestGetSlurmOptionsValidation:
             _call([Mark(name="slurm", args=("gpu",), kwargs={})])
 
     def test_unknown_kwarg_rejected(self) -> None:
-        with pytest.raises(ValueError, match=r"Unknown @pytask\.mark\.slurm kwargs"):
-            _call([_mark(typo="x")])
+        with pytest.raises(ValueError, match="unknown kwargs"):
+            _call([_mark(partitoin="gpu")])
+
+    def test_extra_dict_accepted(self) -> None:
+        result = _call([_mark(extra={"constraint": "a100"})])
+        assert result["extra"] == {"constraint": "a100"}
+        # Well-known defaults should still be present.
+        assert result["partition"] == "default"
+        assert result["time"] == "01:00:00"
+
+    def test_extra_non_dict_rejected(self) -> None:
+        with pytest.raises(TypeError, match="must be a dict"):
+            _call([_mark(extra=42)])
 
     def test_valid_override_merges(self) -> None:
         result = _call([_mark(mem="16G", cpus_per_task=4)])
@@ -347,3 +359,68 @@ class TestWarnOnConflictingExtra:
             _warn_on_conflicting_extra(["-pgpu"])
         assert "-pgpu" in caplog.text
         assert "conflicts" in caplog.text
+
+
+class TestExtraKwargsValidation:
+    """Tests for _validate_extra_option (arbitrary sbatch kwargs)."""
+
+    def test_string_accepted(self) -> None:
+        _validate_extra_option("constraint", "a100", "task_test")
+
+    def test_int_accepted(self) -> None:
+        _validate_extra_option("ntasks", 4, "task_test")
+
+    def test_float_accepted(self) -> None:
+        _validate_extra_option("mem_per_cpu", 2.5, "task_test")
+
+    def test_bool_accepted(self) -> None:
+        _validate_extra_option("exclusive", True, "task_test")
+
+    def test_none_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must not be None"):
+            _validate_extra_option("constraint", None, "task_test")
+
+    def test_dict_rejected(self) -> None:
+        with pytest.raises(TypeError, match="must be str, int, float, or bool"):
+            _validate_extra_option("constraint", {"a": 1}, "task_test")
+
+    def test_list_rejected(self) -> None:
+        with pytest.raises(TypeError, match="must be str, int, float, or bool"):
+            _validate_extra_option("constraint", ["a100"], "task_test")
+
+    def test_extra_dict_none_value_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must not be None"):
+            _call([_mark(extra={"constraint": None})])
+
+    def test_extra_dict_list_value_rejected(self) -> None:
+        with pytest.raises(TypeError, match="must be str, int, float, or bool"):
+            _call([_mark(extra={"constraint": [1]})])
+
+
+class TestBuildSbatchCmdExtraKwargs:
+    """Tests for extra dict in _build_sbatch_cmd."""
+
+    def test_extra_string_flag(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": {"constraint": "a100"}}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--constraint=a100" in cmd
+
+    def test_extra_int_flag(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": {"ntasks": 4}}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--ntasks=4" in cmd
+
+    def test_extra_bool_true_flag(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": {"exclusive": True}}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--exclusive" in cmd
+
+    def test_extra_bool_false_omitted(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": {"exclusive": False}}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--exclusive" not in cmd
+
+    def test_hyphens_preserved(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": {"mail-type": "END"}}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--mail-type=END" in cmd

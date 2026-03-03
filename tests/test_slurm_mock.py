@@ -253,9 +253,10 @@ def test_positional_mark_args_raises(tmp_path: Path) -> None:
     assert "gpu" in str(exc)
 
 
-@pytest.mark.usefixtures("mock_slurm_env")
-def test_unknown_mark_kwarg_raises(tmp_path: Path) -> None:
-    """Typos in @pytask.mark.slurm kwargs should produce a clear error."""
+def test_arbitrary_mark_kwarg_flows_to_sbatch(
+    tmp_path: Path, mock_slurm_env: Path
+) -> None:
+    """extra={...} in @pytask.mark.slurm should become sbatch flags."""
     source = textwrap.dedent("""\
         from pathlib import Path
         from typing import Annotated
@@ -264,8 +265,8 @@ def test_unknown_mark_kwarg_raises(tmp_path: Path) -> None:
         from pytask import Product
 
 
-        @pytask.mark.slurm(partitoin="gpu")
-        def task_typo(
+        @pytask.mark.slurm(extra={"constraint": "a100", "ntasks": "4"})
+        def task_extra(
             output: Annotated[Path, Product] = Path("out.txt"),
         ) -> None:
             output.write_text("done")
@@ -278,16 +279,16 @@ def test_unknown_mark_kwarg_raises(tmp_path: Path) -> None:
         slurm_poll_interval=0.5,
     )
 
-    assert session.exit_code == ExitCode.FAILED
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("out.txt").read_text() == "done"
 
-    # Verify the error is specifically a ValueError about the unknown kwarg.
-    # Note: relies on pytask's execution_reports / exc_info internals.
-    failed = [r for r in session.execution_reports if r.exc_info and r.exc_info[1]]
-    assert failed, "Expected at least one execution report with exception info"
-    exc = failed[0].exc_info[1]  # type: ignore[index]
-    assert isinstance(exc, ValueError)
-    assert "Unknown @pytask.mark.slurm kwargs" in str(exc)
-    assert "partitoin" in str(exc)
+    # Verify the extra kwargs appear as sbatch flags.
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--constraint=a100" in sbatch_line
+    assert "--ntasks=4" in sbatch_line
 
 
 def test_qos_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
