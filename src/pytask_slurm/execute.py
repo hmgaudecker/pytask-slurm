@@ -27,8 +27,10 @@ logger = logging.getLogger(__name__)
 
 _PENDING_STATUSES = frozenset({SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING})
 
+_LOG_TAIL_MAX_CHARS = 4000
 
-def _read_log_tail(log_path: Path, max_chars: int = 4000) -> str:
+
+def _read_log_tail(log_path: Path, max_chars: int = _LOG_TAIL_MAX_CHARS) -> str:
     """Read the tail of a SLURM log file, returning at most *max_chars*."""
     try:
         if log_path.exists():
@@ -207,8 +209,8 @@ def _collect_completed_jobs(
         return []
 
     newly_collected: list[ExecutionReport] = []
-    job_id_to_name = {j.job_id: name for name, j in running_jobs.items()}
-    results = poll_job_statuses(list(job_id_to_name))
+    job_id_to_task_name = {j.job_id: name for name, j in running_jobs.items()}
+    results = poll_job_statuses(list(job_id_to_task_name))
     completed_task_names: list[str] = []
 
     # Refresh NFS cache once before reading any result/log files.
@@ -221,7 +223,7 @@ def _collect_completed_jobs(
             work_dirs_refreshed.add(parent)
 
     for job_id, job_result in results.items():
-        task_name = job_id_to_name.get(job_id)
+        task_name = job_id_to_task_name.get(job_id)
         if task_name is None:
             continue
         slurm_job = running_jobs[task_name]
@@ -289,7 +291,7 @@ def _process_completed_job(
             f"{slurm_job.result_path}"
         )
         if log_content:
-            msg += f"\n\nSLURM log (last 4000 chars):\n{log_content}"
+            msg += f"\n\nSLURM log (last {_LOG_TAIL_MAX_CHARS} chars):\n{log_content}"
         else:
             msg += "\n\nSLURM log is empty — the worker process may have crashed at startup."
 
@@ -317,13 +319,13 @@ def _process_completed_job(
     # Refresh NFS cache for directories containing products.  The SLURM
     # worker writes product files on a compute node; the NFS attribute
     # cache on the login node may not yet reflect these writes.
-    _refreshed: set[Path] = set()
+    product_dirs_refreshed: set[Path] = set()
     for node in tree_leaves(task.produces):
         if isinstance(node, PPathNode):
             parent = node.path.parent
-            if parent not in _refreshed:
+            if parent not in product_dirs_refreshed:
                 _refresh_nfs_cache(parent)
-                _refreshed.add(parent)
+                product_dirs_refreshed.add(parent)
 
     try:
         session.hook.pytask_execute_task_teardown(session=session, task=task)
@@ -346,7 +348,7 @@ def _process_nonzero_exit(
         f"reported COMPLETED but exited with code {exit_code}"
     )
     if log_content:
-        msg += f"\n\nSLURM log (last 4000 chars):\n{log_content}"
+        msg += f"\n\nSLURM log (last {_LOG_TAIL_MAX_CHARS} chars):\n{log_content}"
     else:
         msg += "\n\nSLURM log is empty or not yet available."
 
@@ -366,7 +368,7 @@ def _process_failed_job(
 
     msg = f"SLURM job {slurm_job.job_id} {status.value}"
     if log_content:
-        msg += f"\n\nSLURM log (last 4000 chars):\n{log_content}"
+        msg += f"\n\nSLURM log (last {_LOG_TAIL_MAX_CHARS} chars):\n{log_content}"
 
     exc = RuntimeError(msg)
     return ExecutionReport.from_task_and_exception(

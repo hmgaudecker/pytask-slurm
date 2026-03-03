@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from pytask_slurm.submit import (
     _build_sbatch_cmd,
     _get_slurm_options,
     _warn_on_conflicting_extra,
+    _write_batch_script,
 )
 
 _DEFAULT_CONFIG: dict[str, Any] = {
@@ -394,3 +396,48 @@ class TestBuildSbatchCmdExtraKwargs:
         opts = {**_FULL_OPTS, "extra": "--mail-type=END"}
         cmd = _sbatch_cmd(tmp_path, opts=opts)
         assert "--mail-type=END" in cmd
+
+
+class TestWriteBatchScript:
+    """Tests for _write_batch_script content."""
+
+    def test_shebang_present(self, tmp_path: Path) -> None:
+        script = tmp_path / "job.sh"
+        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        content = script.read_text()
+        assert content.startswith("#!/bin/bash\n")
+
+    def test_stderr_redirect(self, tmp_path: Path) -> None:
+        script = tmp_path / "job.sh"
+        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        content = script.read_text()
+        assert "exec 2>&1" in content
+
+    def test_diagnostic_echoes(self, tmp_path: Path) -> None:
+        script = tmp_path / "job.sh"
+        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        content = script.read_text()
+        assert "pytask-slurm: starting" in content
+        assert "pytask-slurm: runner exited with code" in content
+
+    def test_runner_command_with_paths(self, tmp_path: Path) -> None:
+        payload = tmp_path / "payload.pkl"
+        result = tmp_path / "result.pkl"
+        script = tmp_path / "job.sh"
+        _write_batch_script("/usr/bin/python3", payload, result, script)
+        content = script.read_text()
+        assert "-m pytask_slurm.runner" in content
+        assert str(payload) in content
+        assert str(result) in content
+
+    def test_exit_code_propagation(self, tmp_path: Path) -> None:
+        script = tmp_path / "job.sh"
+        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        content = script.read_text()
+        assert "_exit_code=$?" in content
+        assert "exit $_exit_code" in content
+
+    def test_script_is_executable(self, tmp_path: Path) -> None:
+        script = tmp_path / "job.sh"
+        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        assert os.access(script, os.X_OK)

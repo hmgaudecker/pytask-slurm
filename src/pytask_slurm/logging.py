@@ -18,11 +18,13 @@ def pytask_log_session_header(session: Session) -> None:
         parts.append(f"mem={config['slurm_mem']}")
     if config["slurm_cpus_per_task"] is not None:
         parts.append(f"cpus_per_task={config['slurm_cpus_per_task']}")
+    if config["slurm_gpus"] is not None:
+        parts.append(f"gpus={config['slurm_gpus']}")
     parts.append(f"max_jobs={config['slurm_max_jobs']}")
-    if config["slurm_account"]:
+    if config["slurm_account"] is not None:
         parts.append(f"account={config['slurm_account']}")
-    if config["slurm_qos"]:
+    if config["slurm_qos"] is not None:
         parts.append(f"qos={config['slurm_qos']}")
-    if config["slurm_extra"]:
+    if config["slurm_extra"] is not None:
         parts.append(f"extra={config['slurm_extra']!r}")
     console.print(f"SLURM: {', '.join(parts)}")

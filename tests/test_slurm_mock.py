@@ -445,3 +445,70 @@ def test_session_header(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     assert session.exit_code == ExitCode.OK
     captured = capsys.readouterr()
     assert "SLURM:" in captured.out
+
+
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_session_header_includes_gpus(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """SLURM session header should include gpus when set."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+        slurm_gpus=2,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    captured = capsys.readouterr()
+    assert "gpus=2" in captured.out
+
+
+def test_per_task_gpu_override(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """@pytask.mark.slurm(gpus=2) should override global --slurm-gpus=1."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        import pytask
+        from pytask import Product
+
+
+        @pytask.mark.slurm(gpus=2)
+        def task_gpu(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+
+    session = build(
+        paths=tmp_path,
+        slurm=True,
+        slurm_poll_interval=0.5,
+        slurm_gpus=1,
+    )
+
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("out.txt").read_text() == "done"
+
+    # The per-task mark (gpus=2) should override the global default (gpus=1).
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--gpus=2" in sbatch_line
