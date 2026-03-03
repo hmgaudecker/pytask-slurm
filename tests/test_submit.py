@@ -13,7 +13,6 @@ from pytask import Mark
 from pytask_slurm.submit import (
     _build_sbatch_cmd,
     _get_slurm_options,
-    _validate_extra_option,
     _warn_on_conflicting_extra,
 )
 
@@ -25,6 +24,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_account": "myaccount",
     "slurm_qos": None,
     "slurm_gpus": None,
+    "slurm_extra": None,
 }
 
 
@@ -96,16 +96,20 @@ class TestGetSlurmOptionsValidation:
         with pytest.raises(ValueError, match="unknown kwargs"):
             _call([_mark(partitoin="gpu")])
 
-    def test_extra_dict_accepted(self) -> None:
-        result = _call([_mark(extra={"constraint": "a100"})])
-        assert result["extra"] == {"constraint": "a100"}
+    def test_extra_string_accepted(self) -> None:
+        result = _call([_mark(extra="--constraint=a100")])
+        assert result["extra"] == "--constraint=a100"
         # Well-known defaults should still be present.
         assert result["partition"] == "default"
         assert result["time"] == "01:00:00"
 
-    def test_extra_non_dict_rejected(self) -> None:
-        with pytest.raises(TypeError, match="must be a dict"):
+    def test_extra_non_string_rejected(self) -> None:
+        with pytest.raises(TypeError, match="must be a str"):
             _call([_mark(extra=42)])
+
+    def test_extra_dict_rejected(self) -> None:
+        with pytest.raises(TypeError, match="must be a str"):
+            _call([_mark(extra={"constraint": "a100"})])
 
     def test_valid_override_merges(self) -> None:
         result = _call([_mark(mem="16G", cpus_per_task=4)])
@@ -152,29 +156,23 @@ class TestGetSlurmOptionsConfigValidation:
             result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
         assert result["partition"] is None
 
-    def test_config_none_time_rejected(self) -> None:
+    def test_config_none_time_allowed(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_time": None}
-        with (
-            patch("pytask_slurm.submit.get_marks", return_value=[]),
-            pytest.raises(ValueError, match="must not be None"),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        assert result["time"] is None
 
-    def test_config_none_mem_rejected(self) -> None:
+    def test_config_none_mem_allowed(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_mem": None}
-        with (
-            patch("pytask_slurm.submit.get_marks", return_value=[]),
-            pytest.raises(ValueError, match="must not be None"),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        assert result["mem"] is None
 
-    def test_config_none_cpus_per_task_rejected(self) -> None:
+    def test_config_none_cpus_per_task_allowed(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": None}
-        with (
-            patch("pytask_slurm.submit.get_marks", return_value=[]),
-            pytest.raises(ValueError, match="must not be None"),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        with patch("pytask_slurm.submit.get_marks", return_value=[]):
+            result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
+        assert result["cpus_per_task"] is None
 
     def test_invalid_config_caught_even_when_mark_overrides(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": True}
@@ -239,10 +237,11 @@ def _sbatch_cmd(
     opts: dict[str, Any] | None = None,
     extra: str | None = None,
 ) -> list[str]:
-    config = {**_DEFAULT_CONFIG, "slurm_extra": extra}
+    resolved = dict(opts or _FULL_OPTS)
+    if extra is not None:
+        resolved["extra"] = extra
     return _build_sbatch_cmd(
-        opts or _FULL_OPTS,
-        config,
+        resolved,
         "abc123",
         log_path=tmp_path / "log",
         script_path=tmp_path / "job.sh",
@@ -292,30 +291,33 @@ class TestBuildSbatchCmd:
         assert not any(f.startswith("--account=") for f in cmd)
         assert not any(f.startswith("--qos=") for f in cmd)
 
+    def test_none_time_omitted(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "time": None}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert not any(f.startswith("--time=") for f in cmd)
+
+    def test_none_mem_omitted(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "mem": None}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert not any(f.startswith("--mem=") for f in cmd)
+
+    def test_none_cpus_per_task_omitted(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "cpus_per_task": None}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert not any(f.startswith("--cpus-per-task=") for f in cmd)
+
     def test_slurm_extra_appended(self, tmp_path: Path) -> None:
         cmd = _sbatch_cmd(tmp_path, extra="--gres=gpu:1 --nodelist=node01")
         assert "--gres=gpu:1" in cmd
         assert "--nodelist=node01" in cmd
 
-    def test_slurm_extra_non_string_rejected(self, tmp_path: Path) -> None:
-        opts: dict[str, Any] = {
-            "partition": "default",
-            "time": "01:00:00",
-            "mem": "4G",
-            "cpus_per_task": 1,
-            "account": "myaccount",
-            "qos": None,
-            "gpus": None,
-        }
+    def test_slurm_extra_non_string_rejected(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_extra": 42}
-        with pytest.raises(TypeError, match="slurm_extra must be a string, got int"):
-            _build_sbatch_cmd(
-                opts,
-                config,
-                "abc123",
-                log_path=tmp_path / "log",
-                script_path=tmp_path / "job.sh",
-            )
+        with (
+            patch("pytask_slurm.submit.get_marks", return_value=[]),
+            pytest.raises(TypeError, match="slurm_extra must be a string, got int"),
+        ):
+            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
 
 
 class TestWarnOnConflictingExtra:
@@ -362,66 +364,33 @@ class TestWarnOnConflictingExtra:
         assert "conflicts" in caplog.text
 
 
-class TestExtraKwargsValidation:
-    """Tests for _validate_extra_option (arbitrary sbatch kwargs)."""
-
-    def test_string_accepted(self) -> None:
-        _validate_extra_option("constraint", "a100", "task_test")
-
-    def test_int_accepted(self) -> None:
-        _validate_extra_option("ntasks", 4, "task_test")
-
-    def test_float_accepted(self) -> None:
-        _validate_extra_option("mem_per_cpu", 2.5, "task_test")
-
-    def test_bool_accepted(self) -> None:
-        _validate_extra_option("exclusive", True, "task_test")
-
-    def test_none_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must not be None"):
-            _validate_extra_option("constraint", None, "task_test")
-
-    def test_dict_rejected(self) -> None:
-        with pytest.raises(TypeError, match="must be str, int, float, or bool"):
-            _validate_extra_option("constraint", {"a": 1}, "task_test")
-
-    def test_list_rejected(self) -> None:
-        with pytest.raises(TypeError, match="must be str, int, float, or bool"):
-            _validate_extra_option("constraint", ["a100"], "task_test")
-
-    def test_extra_dict_none_value_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must not be None"):
-            _call([_mark(extra={"constraint": None})])
-
-    def test_extra_dict_list_value_rejected(self) -> None:
-        with pytest.raises(TypeError, match="must be str, int, float, or bool"):
-            _call([_mark(extra={"constraint": [1]})])
-
 
 class TestBuildSbatchCmdExtraKwargs:
-    """Tests for extra dict in _build_sbatch_cmd."""
+    """Tests for extra string in _build_sbatch_cmd."""
 
     def test_extra_string_flag(self, tmp_path: Path) -> None:
-        opts = {**_FULL_OPTS, "extra": {"constraint": "a100"}}
+        opts = {**_FULL_OPTS, "extra": "--constraint=a100"}
         cmd = _sbatch_cmd(tmp_path, opts=opts)
         assert "--constraint=a100" in cmd
 
-    def test_extra_int_flag(self, tmp_path: Path) -> None:
-        opts = {**_FULL_OPTS, "extra": {"ntasks": 4}}
+    def test_extra_multiple_flags(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": "--constraint=a100 --ntasks=4"}
         cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--constraint=a100" in cmd
         assert "--ntasks=4" in cmd
 
-    def test_extra_bool_true_flag(self, tmp_path: Path) -> None:
-        opts = {**_FULL_OPTS, "extra": {"exclusive": True}}
+    def test_extra_bare_flag(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": "--exclusive"}
         cmd = _sbatch_cmd(tmp_path, opts=opts)
         assert "--exclusive" in cmd
 
-    def test_extra_bool_false_omitted(self, tmp_path: Path) -> None:
-        opts = {**_FULL_OPTS, "extra": {"exclusive": False}}
-        cmd = _sbatch_cmd(tmp_path, opts=opts)
-        assert "--exclusive" not in cmd
+    def test_extra_empty_string_no_effect(self, tmp_path: Path) -> None:
+        opts = {**_FULL_OPTS, "extra": ""}
+        cmd_with_extra = _sbatch_cmd(tmp_path, opts=opts)
+        cmd_without = _sbatch_cmd(tmp_path, opts=_FULL_OPTS)
+        assert cmd_with_extra == cmd_without
 
     def test_hyphens_preserved(self, tmp_path: Path) -> None:
-        opts = {**_FULL_OPTS, "extra": {"mail-type": "END"}}
+        opts = {**_FULL_OPTS, "extra": "--mail-type=END"}
         cmd = _sbatch_cmd(tmp_path, opts=opts)
         assert "--mail-type=END" in cmd

@@ -30,7 +30,6 @@ _SLURM_MARK_KEYS = frozenset(
     {"partition", "time", "mem", "cpus_per_task", "account", "qos", "gpus"}
 )
 _SLURM_INT_KEYS = frozenset({"cpus_per_task", "gpus"})
-_NULLABLE_KEYS = frozenset({"partition", "account", "qos", "gpus"})
 
 
 @dataclass(frozen=True)
@@ -96,25 +95,6 @@ def _validate_slurm_option(
             raise ValueError(msg)
 
 
-def _validate_extra_option(
-    key: str,
-    value: Any,  # noqa: ANN401
-    task_name: str,
-) -> None:
-    """Validate an arbitrary (non-well-known) sbatch option from the extra dict."""
-    if value is None:
-        msg = (
-            f"extra dict key {key!r} for task {task_name!r} "
-            f"must not be None (use False to omit a flag)."
-        )
-        raise ValueError(msg)
-    if isinstance(value, (dict, list, tuple, set, frozenset)):
-        msg = (
-            f"extra dict key {key!r} for task {task_name!r} "
-            f"must be str, int, float, or bool, got {type(value).__name__}."
-        )
-        raise TypeError(msg)
-
 
 def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
     """Validate and return kwargs from a single ``@pytask.mark.slurm`` decorator."""
@@ -131,7 +111,7 @@ def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
         msg = (
             f"@pytask.mark.slurm for task {task_name!r} received unknown "
             f"kwargs {sorted(unknown)}. Well-known options: "
-            f"{sorted(_SLURM_MARK_KEYS)}. Use extra={{...}} for arbitrary "
+            f"{sorted(_SLURM_MARK_KEYS)}. Use extra=\"...\" for arbitrary "
             f"sbatch flags."
         )
         raise ValueError(msg)
@@ -151,14 +131,12 @@ def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
 
     extra = mark.kwargs.get("extra")
     if extra is not None:
-        if not isinstance(extra, dict):
+        if not isinstance(extra, str):
             msg = (
                 f"@pytask.mark.slurm 'extra' for task {task_name!r} "
-                f"must be a dict, got {type(extra).__name__}."
+                f"must be a str, got {type(extra).__name__}."
             )
             raise TypeError(msg)
-        for k, v in extra.items():
-            _validate_extra_option(k, v, task_name)
 
     return dict(mark.kwargs)
 
@@ -173,6 +151,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "account": session_config["slurm_account"],
         "qos": session_config["slurm_qos"],
         "gpus": session_config["slurm_gpus"],
+        "extra": session_config["slurm_extra"],
     }
 
     marks = get_marks(task, "slurm")
@@ -187,19 +166,15 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
     # Validate all non-None config values upfront (catches invalid config even
     # when a mark overrides the key, so misconfigurations don't go unnoticed).
     for key, value in options.items():
-        if value is not None:
+        if key == "extra":
+            if value is not None and not isinstance(value, str):
+                msg = f"slurm_extra must be a string, got {type(value).__name__}"
+                raise TypeError(msg)
+        elif value is not None:
             _validate_slurm_option(key, value, task.name, source="Global config")
 
     if marks:
         options.update(_validate_mark(marks[0], task.name))
-
-    # time, mem, and cpus_per_task are always passed to sbatch unconditionally,
-    # so they must not be None after merging.  partition and account are
-    # optional (only appended when truthy), so None is valid for them.
-    for key in sorted(_SLURM_MARK_KEYS - _NULLABLE_KEYS):
-        if options[key] is None:
-            msg = f"SLURM option {key!r} for task {task.name!r} must not be None."
-            raise ValueError(msg)
 
     return options
 
@@ -303,23 +278,25 @@ def _write_batch_script(
 
 def _build_sbatch_cmd(
     opts: dict[str, Any],
-    session_config: dict[str, Any],
     task_hash: str,
     *,
     log_path: Path,
     script_path: Path,
 ) -> list[str]:
-    """Build the sbatch command list from task options and config."""
+    """Build the sbatch command list from task options."""
     cmd = [
         "sbatch",
         "--parsable",
         f"--job-name=pytask-{task_hash}",
-        f"--time={opts['time']}",
-        f"--mem={opts['mem']}",
-        f"--cpus-per-task={opts['cpus_per_task']}",
         f"--output={log_path}",
     ]
 
+    if opts["time"] is not None:
+        cmd.append(f"--time={opts['time']}")
+    if opts["mem"] is not None:
+        cmd.append(f"--mem={opts['mem']}")
+    if opts["cpus_per_task"] is not None:
+        cmd.append(f"--cpus-per-task={opts['cpus_per_task']}")
     if opts["partition"]:
         cmd.append(f"--partition={opts['partition']}")
     if opts["account"]:
@@ -329,28 +306,11 @@ def _build_sbatch_cmd(
     if opts["gpus"] is not None:
         cmd.append(f"--gpus={opts['gpus']}")
 
-    # Append flags for arbitrary sbatch options from the extra dict.
-    mark_extra = opts.get("extra", {})
-    extra_mark_flags: set[str] = set()
-    for key, value in sorted(mark_extra.items()):
-        flag = f"--{key}"
-        extra_mark_flags.add(flag)
-        if isinstance(value, bool):
-            if value:
-                cmd.append(flag)
-        else:
-            cmd.append(f"{flag}={value}")
-
-    extra = session_config["slurm_extra"]
+    # Append extra sbatch flags (merged: config default, overridden by mark).
+    extra = opts.get("extra")
     if extra:
-        if not isinstance(extra, str):
-            msg = f"slurm_extra must be a string, got {type(extra).__name__}"
-            raise TypeError(msg)
         extra_tokens = shlex.split(extra)
-        _warn_on_conflicting_extra(
-            extra_tokens,
-            generated_flags=_GENERATED_SBATCH_FLAGS | frozenset(extra_mark_flags),
-        )
+        _warn_on_conflicting_extra(extra_tokens)
         cmd.extend(extra_tokens)
 
     cmd.append(str(script_path))
@@ -418,7 +378,6 @@ def submit_task(
     opts = _get_slurm_options(task, session_config)
     cmd = _build_sbatch_cmd(
         opts,
-        session_config,
         task_hash,
         log_path=log_path,
         script_path=script_path,

@@ -256,7 +256,7 @@ def test_positional_mark_args_raises(tmp_path: Path) -> None:
 def test_arbitrary_mark_kwarg_flows_to_sbatch(
     tmp_path: Path, mock_slurm_env: Path
 ) -> None:
-    """extra={...} in @pytask.mark.slurm should become sbatch flags."""
+    """extra="..." in @pytask.mark.slurm should become sbatch flags."""
     source = textwrap.dedent("""\
         from pathlib import Path
         from typing import Annotated
@@ -265,7 +265,7 @@ def test_arbitrary_mark_kwarg_flows_to_sbatch(
         from pytask import Product
 
 
-        @pytask.mark.slurm(extra={"constraint": "a100", "ntasks": "4"})
+        @pytask.mark.slurm(extra="--constraint=a100 --ntasks=4")
         def task_extra(
             output: Annotated[Path, Product] = Path("out.txt"),
         ) -> None:
