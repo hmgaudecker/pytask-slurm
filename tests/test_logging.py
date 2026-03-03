@@ -21,7 +21,6 @@ _BASE_CONFIG: dict[str, Any] = {
     "slurm_mem": "8G",
     "slurm_cpus_per_task": 4,
     "slurm_gpus": None,
-    "slurm_max_jobs": 50,
     "slurm_account": "research",
     "slurm_qos": "high",
     "slurm_extra": None,
@@ -41,7 +40,6 @@ class TestLogSessionHeader:
         assert "time=02:00:00" in output
         assert "mem=8G" in output
         assert "cpus_per_task=4" in output
-        assert "max_jobs=50" in output
         assert "account=research" in output
         assert "qos=high" in output
 

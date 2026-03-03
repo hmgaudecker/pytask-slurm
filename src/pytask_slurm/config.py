@@ -16,17 +16,23 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
         " sbatch option (e.g. extra=\"--constraint=a100 --mail-type=END\")."
     )
     config.setdefault("slurm", False)
+
+    # SLURM resource options — passed through to sbatch.  When None, the
+    # corresponding flag is omitted and SLURM uses the cluster's own default.
     config.setdefault("slurm_partition", None)
     config.setdefault("slurm_time", None)
     config.setdefault("slurm_mem", None)
     config.setdefault("slurm_cpus_per_task", None)
-    config.setdefault("slurm_max_jobs", None)
-    config.setdefault("slurm_poll_interval", None)
     config.setdefault("slurm_account", None)
     config.setdefault("slurm_qos", None)
     config.setdefault("slurm_gpus", None)
     config.setdefault("slurm_extra", None)
-    config.setdefault("slurm_unknown_timeout", None)
+
+    # pytask-slurm executor parameters — control the plugin's own scheduling
+    # loop, not passed to sbatch.
+    config.setdefault("slurm_max_jobs", 50)
+    config.setdefault("slurm_poll_interval", 10)
+    config.setdefault("slurm_unknown_timeout", 300)
 
 
 @hookimpl(trylast=True)

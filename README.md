@@ -73,13 +73,13 @@ def task_gpu_training(): ...
 All options are only passed to sbatch when explicitly set. There are no built-in
 defaults — you must configure every option you need.
 
-### Executor options
+### Executor options (pytask-slurm internal, not passed to sbatch)
 
-| pyproject.toml key | Type | Description |
-|---|---|---|
-| `slurm_max_jobs` | int | Max concurrent SLURM jobs |
-| `slurm_poll_interval` | float | Seconds between sacct polls |
-| `slurm_unknown_timeout` | int | Seconds a job may stay UNKNOWN before treated as failed |
+| pyproject.toml key | Type | Default | Description |
+|---|---|---|---|
+| `slurm_max_jobs` | int | 50 | Max concurrent SLURM jobs |
+| `slurm_poll_interval` | float | 10 | Seconds between sacct polls |
+| `slurm_unknown_timeout` | int | 300 | Seconds a job may stay UNKNOWN before treated as failed |
 
 ### Extra sbatch flags
 
