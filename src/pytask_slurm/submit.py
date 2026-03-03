@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 _SLURM_MARK_KEYS = frozenset(
     {"partition", "time", "mem", "cpus_per_task", "account", "qos", "gpus"}
 )
-_SLURM_INT_KEYS = frozenset({"cpus_per_task", "gpus"})
 
 
 @dataclass(frozen=True)
@@ -52,40 +51,6 @@ class TaskPayload:
     show_locals: bool
     task_filterwarnings: list[Any]
     result_path: str
-
-
-def _validate_slurm_option(
-    key: str,
-    value: Any,  # noqa: ANN401
-    task_name: str,
-    source: str = "SLURM option",
-) -> None:
-    """Validate a single SLURM option value (type and range)."""
-    if key in _SLURM_INT_KEYS:
-        if isinstance(value, bool) or not isinstance(value, int):
-            msg = (
-                f"{source} {key!r} for task {task_name!r} "
-                f"must be an int, got {type(value).__name__}."
-            )
-            raise ValueError(msg)
-        if value <= 0:
-            msg = (
-                f"{source} {key!r} for task {task_name!r} "
-                f"must be a positive integer, got {value}."
-            )
-            raise ValueError(msg)
-    else:
-        if not isinstance(value, str):
-            msg = (
-                f"{source} {key!r} for task {task_name!r} "
-                f"must be a str, got {type(value).__name__}."
-            )
-            raise ValueError(msg)
-        if not value:
-            msg = (
-                f"{source} {key!r} for task {task_name!r} must not be an empty string."
-            )
-            raise ValueError(msg)
 
 
 def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
@@ -117,18 +82,6 @@ def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
                 f"must not be None."
             )
             raise ValueError(msg)
-        _validate_slurm_option(
-            key, value, task_name, source="@pytask.mark.slurm kwarg"
-        )
-
-    extra = mark.kwargs.get("extra")
-    if extra is not None:
-        if not isinstance(extra, str):
-            msg = (
-                f"@pytask.mark.slurm 'extra' for task {task_name!r} "
-                f"must be a str, got {type(extra).__name__}."
-            )
-            raise TypeError(msg)
 
     return dict(mark.kwargs)
 
@@ -154,16 +107,6 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
             f"but only one is allowed. Merge them into a single decorator."
         )
         raise ValueError(msg)
-
-    # Validate all non-None config values upfront (catches invalid config even
-    # when a mark overrides the key, so misconfigurations don't go unnoticed).
-    for key, value in options.items():
-        if key == "extra":
-            if value is not None and not isinstance(value, str):
-                msg = f"slurm_extra must be a string, got {type(value).__name__}"
-                raise TypeError(msg)
-        elif value is not None:
-            _validate_slurm_option(key, value, task.name, source="Global config")
 
     if marks:
         options.update(_validate_mark(marks[0], task.name))

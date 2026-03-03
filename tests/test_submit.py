@@ -47,38 +47,6 @@ def _mark(**kwargs: Any) -> Mark:  # noqa: ANN401
 
 
 class TestGetSlurmOptionsValidation:
-    def test_cpus_per_task_bool_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be an int, got bool"):
-            _call([_mark(cpus_per_task=True)])
-
-    def test_cpus_per_task_zero_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be a positive integer, got 0"):
-            _call([_mark(cpus_per_task=0)])
-
-    def test_cpus_per_task_negative_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be a positive integer, got -1"):
-            _call([_mark(cpus_per_task=-1)])
-
-    def test_cpus_per_task_float_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be an int, got float"):
-            _call([_mark(cpus_per_task=2.5)])
-
-    def test_cpus_per_task_string_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be an int, got str"):
-            _call([_mark(cpus_per_task="4")])
-
-    def test_string_key_with_non_string_value_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be a str, got int"):
-            _call([_mark(mem=16)])
-
-    def test_account_non_string_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be a str, got int"):
-            _call([_mark(account=123)])
-
-    def test_empty_string_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must not be an empty string"):
-            _call([_mark(partition="")])
-
     def test_none_value_rejected(self) -> None:
         with pytest.raises(ValueError, match="must not be None"):
             _call([_mark(time=None)])
@@ -103,14 +71,6 @@ class TestGetSlurmOptionsValidation:
         assert result["partition"] == "default"
         assert result["time"] == "01:00:00"
 
-    def test_extra_non_string_rejected(self) -> None:
-        with pytest.raises(TypeError, match="must be a str"):
-            _call([_mark(extra=42)])
-
-    def test_extra_dict_rejected(self) -> None:
-        with pytest.raises(TypeError, match="must be a str"):
-            _call([_mark(extra={"constraint": "a100"})])
-
     def test_valid_override_merges(self) -> None:
         result = _call([_mark(mem="16G", cpus_per_task=4)])
         assert result["mem"] == "16G"
@@ -122,33 +82,6 @@ class TestGetSlurmOptionsValidation:
 
 class TestGetSlurmOptionsConfigValidation:
     """Validation of global config values (not just mark kwargs)."""
-
-    def test_config_cpus_per_task_bool_rejected(self) -> None:
-        config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": True}
-        with (
-            patch("pytask_slurm.submit.get_marks", return_value=[]),
-            pytest.raises(ValueError, match=r"Global config.*must be an int, got bool"),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
-
-    def test_config_mem_int_rejected(self) -> None:
-        config = {**_DEFAULT_CONFIG, "slurm_mem": 0}
-        with (
-            patch("pytask_slurm.submit.get_marks", return_value=[]),
-            pytest.raises(ValueError, match=r"Global config.*must be a str, got int"),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
-
-    def test_config_time_empty_string_rejected(self) -> None:
-        config = {**_DEFAULT_CONFIG, "slurm_time": ""}
-        with (
-            patch("pytask_slurm.submit.get_marks", return_value=[]),
-            pytest.raises(
-                ValueError,
-                match=r"Global config.*must not be an empty string",
-            ),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
 
     def test_config_none_partition_allowed(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_partition": None}
@@ -174,19 +107,6 @@ class TestGetSlurmOptionsConfigValidation:
             result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
         assert result["cpus_per_task"] is None
 
-    def test_invalid_config_caught_even_when_mark_overrides(self) -> None:
-        config = {**_DEFAULT_CONFIG, "slurm_cpus_per_task": True}
-        with (
-            patch(
-                "pytask_slurm.submit.get_marks",
-                return_value=[_mark(cpus_per_task=4)],
-            ),
-            pytest.raises(
-                ValueError,
-                match=r"Global config.*must be an int, got bool",
-            ),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
 
 
 class TestQosOption:
@@ -212,13 +132,6 @@ class TestQosOption:
             result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
         assert result["qos"] == "low"
 
-    def test_qos_non_string_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be a str, got int"):
-            _call([_mark(qos=123)])
-
-    def test_qos_empty_string_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must not be an empty string"):
-            _call([_mark(qos="")])
 
 
 _FULL_OPTS: dict[str, Any] = {
@@ -252,10 +165,6 @@ class TestGpusOption:
     def test_gpus_accepted(self) -> None:
         result = _call([_mark(gpus=1)])
         assert result["gpus"] == 1
-
-    def test_gpus_zero_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be a positive integer, got 0"):
-            _call([_mark(gpus=0)])
 
     def test_gpus_none_omits_flag(self, tmp_path: Path) -> None:
         opts = {**_FULL_OPTS, "gpus": None}
@@ -311,13 +220,6 @@ class TestBuildSbatchCmd:
         assert "--gres=gpu:1" in cmd
         assert "--nodelist=node01" in cmd
 
-    def test_slurm_extra_non_string_rejected(self) -> None:
-        config = {**_DEFAULT_CONFIG, "slurm_extra": 42}
-        with (
-            patch("pytask_slurm.submit.get_marks", return_value=[]),
-            pytest.raises(TypeError, match="slurm_extra must be a string, got int"),
-        ):
-            _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
 
 
 class TestBuildSbatchCmdExtraKwargs:
