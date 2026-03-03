@@ -77,9 +77,9 @@ defaults — you must configure every option you need.
 
 | pyproject.toml key | Type | Description |
 |---|---|---|
-| `slurm_max_jobs` | int | Max concurrent SLURM jobs (**required**) |
-| `slurm_poll_interval` | float | Seconds between sacct polls (**required**) |
-| `slurm_unknown_timeout` | int | Seconds a job may stay UNKNOWN before treated as failed (**required**) |
+| `slurm_max_jobs` | int | Max concurrent SLURM jobs |
+| `slurm_poll_interval` | float | Seconds between sacct polls |
+| `slurm_unknown_timeout` | int | Seconds a job may stay UNKNOWN before treated as failed |
 
 ### Extra sbatch flags
 
