@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -18,6 +19,14 @@ class SlurmJobStatus(Enum):
     OUT_OF_MEMORY = "OUT_OF_MEMORY"
     NODE_FAIL = "NODE_FAIL"
     UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class SlurmJobResult:
+    """Status and exit code for a SLURM job."""
+
+    status: SlurmJobStatus
+    exit_code: int | None = None
 
 
 _STATE_MAP: dict[str, SlurmJobStatus] = {
@@ -48,15 +57,39 @@ def _parse_state(raw: str) -> SlurmJobStatus:
     return _STATE_MAP.get(token, SlurmJobStatus.UNKNOWN)
 
 
-def _parse_status_lines(stdout: str) -> dict[str, SlurmJobStatus]:
-    """Parse ``jobid|STATE`` lines into a status mapping."""
-    statuses: dict[str, SlurmJobStatus] = {}
+def _parse_exit_code(raw: str) -> int | None:
+    """Parse SLURM's ``exit:signal`` exit code format (e.g. ``"2:0"`` → 2).
+
+    Returns ``None`` if the format is unrecognised.
+    """
+    if not raw:
+        return None
+    code_part = raw.split(":")[0]
+    try:
+        return int(code_part)
+    except ValueError:
+        return None
+
+
+def _parse_status_lines(
+    stdout: str, *, has_exit_code: bool = True
+) -> dict[str, SlurmJobResult]:
+    """Parse ``jobid|STATE[|ExitCode]`` lines into a result mapping.
+
+    When *has_exit_code* is False (squeue fallback), exit_code is set to None.
+    """
+    results: dict[str, SlurmJobResult] = {}
     for line in stdout.strip().splitlines():
         parts = line.split("|")
         if len(parts) >= 2:  # noqa: PLR2004
             job_id, state_str = parts[0], parts[1]
-            statuses[job_id] = _parse_state(state_str)
-    return statuses
+            exit_code: int | None = None
+            if has_exit_code and len(parts) >= 3:  # noqa: PLR2004
+                exit_code = _parse_exit_code(parts[2])
+            results[job_id] = SlurmJobResult(
+                status=_parse_state(state_str), exit_code=exit_code
+            )
+    return results
 
 
 def _sacct_cmd(job_ids: list[str]) -> list[str]:
@@ -65,7 +98,7 @@ def _sacct_cmd(job_ids: list[str]) -> list[str]:
         "-X",  # no sub-steps
         "--parsable2",
         "--noheader",
-        "--format=JobIDRaw,State",
+        "--format=JobIDRaw,State,ExitCode",
         "--jobs=" + ",".join(job_ids),
     ]
 
@@ -79,12 +112,13 @@ def _squeue_cmd(job_ids: list[str]) -> list[str]:
     ]
 
 
-def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
+def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobResult]:
     """Query sacct for the status of the given SLURM job IDs.
 
     Falls back to squeue when sacct is unavailable or fails.
-    Returns a mapping from job ID to status. Jobs not found in the output are
-    omitted from the result (the caller should treat them as still pending).
+    Returns a mapping from job ID to :class:`SlurmJobResult`. Jobs not found in
+    the output are omitted from the result (the caller should treat them as
+    still pending).
 
     """
     if not job_ids:
@@ -100,7 +134,7 @@ def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
             timeout=30,
         )
         if result.returncode == 0:
-            return _parse_status_lines(result.stdout)
+            return _parse_status_lines(result.stdout, has_exit_code=True)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
@@ -119,7 +153,7 @@ def poll_job_statuses(job_ids: list[str]) -> dict[str, SlurmJobStatus]:
             timeout=30,
         )
         if result.returncode == 0:
-            return _parse_status_lines(result.stdout)
+            return _parse_status_lines(result.stdout, has_exit_code=False)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 

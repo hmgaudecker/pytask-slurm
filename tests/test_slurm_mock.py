@@ -6,11 +6,37 @@ import json
 import os
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pytask import ExitCode, build
 
 MOCK_SLURM_DIR = Path(__file__).parent / "mock_slurm"
+
+# Every integration test must provide at least these executor options.
+_EXECUTOR_DEFAULTS: dict[str, Any] = {
+    "slurm": True,
+    "slurm_poll_interval": 0.5,
+    "slurm_max_jobs": 100,
+    "slurm_unknown_timeout": 600,
+}
+
+
+def _write_pyproject(path: Path, **ini_options: Any) -> None:
+    """Write a pyproject.toml with the given ``[tool.pytask.ini_options]``."""
+    merged = {**_EXECUTOR_DEFAULTS, **ini_options}
+    lines = ["[tool.pytask.ini_options]"]
+    for key, value in merged.items():
+        if isinstance(value, bool):
+            lines.append(f"{key} = {str(value).lower()}")
+        elif isinstance(value, str):
+            lines.append(f'{key} = "{value}"')
+        elif isinstance(value, (int, float)):
+            lines.append(f"{key} = {value}")
+        else:
+            msg = f"Unsupported type {type(value)} for key {key}"
+            raise TypeError(msg)
+    path.joinpath("pyproject.toml").write_text("\n".join(lines) + "\n")
 
 
 @pytest.fixture
@@ -42,12 +68,9 @@ def test_simple_task(tmp_path: Path) -> None:
             output.write_text("hello from slurm")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     assert tmp_path.joinpath("hello.txt").exists()
@@ -76,12 +99,9 @@ def test_two_independent_tasks(tmp_path: Path) -> None:
             output.write_text("2")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     assert tmp_path.joinpath("out_1.txt").read_text() == "1"
@@ -97,12 +117,9 @@ def test_failing_task(tmp_path: Path) -> None:
             raise RuntimeError(msg)
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.FAILED
 
@@ -130,12 +147,9 @@ def test_task_with_dependency(tmp_path: Path) -> None:
             output.write_text(dep.read_text() + " processed")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     assert tmp_path.joinpath("final.txt").read_text() == "data processed"
@@ -158,12 +172,14 @@ def test_per_task_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
-
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
+    _write_pyproject(
+        tmp_path,
+        slurm_time="01:00:00",
+        slurm_mem="4G",
+        slurm_cpus_per_task=1,
     )
+
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     assert tmp_path.joinpath("out.txt").read_text() == "done"
@@ -176,12 +192,12 @@ def test_per_task_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
     sbatch_line = " ".join(sbatch_args)
     assert "--mem=16G" in sbatch_line
     assert "--time=02:00:00" in sbatch_line
-    # Non-overridden defaults should still appear with their default values.
+    # Non-overridden config value should still appear.
     assert "--cpus-per-task=1" in sbatch_line
 
 
-def test_bare_slurm_mark_uses_defaults(tmp_path: Path, mock_slurm_env: Path) -> None:
-    """@pytask.mark.slurm() with no kwargs should use global defaults."""
+def test_bare_slurm_mark_uses_config(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """@pytask.mark.slurm() with no kwargs should use config values."""
     source = textwrap.dedent("""\
         from pathlib import Path
         from typing import Annotated
@@ -197,17 +213,19 @@ def test_bare_slurm_mark_uses_defaults(tmp_path: Path, mock_slurm_env: Path) -> 
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
-
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
+    _write_pyproject(
+        tmp_path,
+        slurm_time="01:00:00",
+        slurm_mem="4G",
+        slurm_cpus_per_task=1,
     )
+
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     assert tmp_path.joinpath("out.txt").read_text() == "done"
 
-    # Verify sbatch args contain the global defaults (not silently dropped).
+    # Verify sbatch args contain the config values (not silently dropped).
     jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
     assert len(jobs) == 1
     (job,) = jobs.values()
@@ -236,12 +254,9 @@ def test_positional_mark_args_raises(tmp_path: Path) -> None:
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.FAILED
 
@@ -253,9 +268,10 @@ def test_positional_mark_args_raises(tmp_path: Path) -> None:
     assert "gpu" in str(exc)
 
 
-@pytest.mark.usefixtures("mock_slurm_env")
-def test_unknown_mark_kwarg_raises(tmp_path: Path) -> None:
-    """Typos in @pytask.mark.slurm kwargs should produce a clear error."""
+def test_arbitrary_mark_kwarg_flows_to_sbatch(
+    tmp_path: Path, mock_slurm_env: Path
+) -> None:
+    """extra="..." in @pytask.mark.slurm should become sbatch flags."""
     source = textwrap.dedent("""\
         from pathlib import Path
         from typing import Annotated
@@ -264,34 +280,31 @@ def test_unknown_mark_kwarg_raises(tmp_path: Path) -> None:
         from pytask import Product
 
 
-        @pytask.mark.slurm(partitoin="gpu")
-        def task_typo(
+        @pytask.mark.slurm(extra="--constraint=a100 --ntasks=4")
+        def task_extra(
             output: Annotated[Path, Product] = Path("out.txt"),
         ) -> None:
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-    )
+    session = build(paths=tmp_path)
 
-    assert session.exit_code == ExitCode.FAILED
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("out.txt").read_text() == "done"
 
-    # Verify the error is specifically a ValueError about the unknown kwarg.
-    # Note: relies on pytask's execution_reports / exc_info internals.
-    failed = [r for r in session.execution_reports if r.exc_info and r.exc_info[1]]
-    assert failed, "Expected at least one execution report with exception info"
-    exc = failed[0].exc_info[1]  # type: ignore[index]
-    assert isinstance(exc, ValueError)
-    assert "Unknown @pytask.mark.slurm kwargs" in str(exc)
-    assert "partitoin" in str(exc)
+    # Verify the extra kwargs appear as sbatch flags.
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--constraint=a100" in sbatch_line
+    assert "--ntasks=4" in sbatch_line
 
 
 def test_qos_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
-    """--slurm-qos should appear in the sbatch command."""
+    """slurm_qos in pyproject.toml should appear in the sbatch command."""
     source = textwrap.dedent("""\
         from pathlib import Path
         from typing import Annotated
@@ -305,13 +318,9 @@ def test_qos_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path, slurm_qos="high")
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-        slurm_qos="high",
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
@@ -321,8 +330,8 @@ def test_qos_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
     assert "--qos=high" in sbatch_line
 
 
-def test_extra_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
-    """--slurm-extra should pass arbitrary flags to sbatch."""
+def test_gpus_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """slurm_gpus in pyproject.toml should appear in the sbatch command."""
     source = textwrap.dedent("""\
         from pathlib import Path
         from typing import Annotated
@@ -336,13 +345,39 @@ def test_extra_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path, slurm_gpus=2)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
+    session = build(paths=tmp_path)
+
+    assert session.exit_code == ExitCode.OK
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--gpus=2" in sbatch_line
+
+
+def test_extra_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """slurm_extra in pyproject.toml should pass arbitrary flags to sbatch."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(
+        tmp_path,
         slurm_extra="--gres=gpu:1 --constraint=a100",
     )
+
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
@@ -354,7 +389,7 @@ def test_extra_flows_to_sbatch(tmp_path: Path, mock_slurm_env: Path) -> None:
 
 
 def test_qos_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
-    """@pytask.mark.slurm(qos=...) should override the global --slurm-qos."""
+    """@pytask.mark.slurm(qos=...) should override the pyproject.toml slurm_qos."""
     source = textwrap.dedent("""\
         from pathlib import Path
         from typing import Annotated
@@ -370,13 +405,9 @@ def test_qos_mark_override(tmp_path: Path, mock_slurm_env: Path) -> None:
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path, slurm_qos="high")
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-        slurm_qos="high",
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
@@ -403,13 +434,69 @@ def test_session_header(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
             output.write_text("done")
     """)
     tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path)
 
-    session = build(
-        paths=tmp_path,
-        slurm=True,
-        slurm_poll_interval=0.5,
-    )
+    session = build(paths=tmp_path)
 
     assert session.exit_code == ExitCode.OK
     captured = capsys.readouterr()
     assert "SLURM:" in captured.out
+
+
+@pytest.mark.usefixtures("mock_slurm_env")
+def test_session_header_includes_gpus(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """SLURM session header should include gpus when set."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        from pytask import Product
+
+
+        def task_hello(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path, slurm_gpus=2)
+
+    session = build(paths=tmp_path)
+
+    assert session.exit_code == ExitCode.OK
+    captured = capsys.readouterr()
+    assert "gpus=2" in captured.out
+
+
+def test_per_task_gpu_override(tmp_path: Path, mock_slurm_env: Path) -> None:
+    """@pytask.mark.slurm(gpus=2) should override pyproject.toml slurm_gpus=1."""
+    source = textwrap.dedent("""\
+        from pathlib import Path
+        from typing import Annotated
+
+        import pytask
+        from pytask import Product
+
+
+        @pytask.mark.slurm(gpus=2)
+        def task_gpu(
+            output: Annotated[Path, Product] = Path("out.txt"),
+        ) -> None:
+            output.write_text("done")
+    """)
+    tmp_path.joinpath("task_example.py").write_text(source)
+    _write_pyproject(tmp_path, slurm_gpus=1)
+
+    session = build(paths=tmp_path)
+
+    assert session.exit_code == ExitCode.OK
+    assert tmp_path.joinpath("out.txt").read_text() == "done"
+
+    # The per-task mark (gpus=2) should override the pyproject.toml value (gpus=1).
+    jobs = json.loads((mock_slurm_env / "jobs.json").read_text())
+    assert len(jobs) == 1
+    (job,) = jobs.values()
+    sbatch_line = " ".join(job["sbatch_args"])
+    assert "--gpus=2" in sbatch_line

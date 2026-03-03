@@ -11,8 +11,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pytask_slurm.execute import (
+    _LOG_TAIL_MAX_CHARS,
     _check_result_file_fallback,
     _is_actionable_status,
+    _process_nonzero_exit,
     _result_file_is_stable,
 )
 from pytask_slurm.monitor import SlurmJobStatus
@@ -24,13 +26,14 @@ def _make_slurm_job(
     task_name: str = "task_example",
     submitted_at: float = 0.0,
     result_path: Path | None = None,
+    log_path: Path | None = None,
 ) -> SlurmJob:
     return SlurmJob(
         job_id=job_id,
         task_name=task_name,
         payload_path=Path("/fake/payload.pkl"),
         result_path=result_path or Path("/fake/result.pkl"),
-        log_path=Path("/fake/job.log"),
+        log_path=log_path or Path("/fake/job.log"),
         submitted_at=submitted_at,
     )
 
@@ -205,3 +208,46 @@ class TestResultFileIsStable:
     def test_missing_file_is_not_stable(self, tmp_path: Path) -> None:
         p = tmp_path / "nonexistent.pkl"
         assert _result_file_is_stable(p) is False
+
+
+class TestProcessNonzeroExit:
+    """Tests for _process_nonzero_exit (COMPLETED + nonzero exit code)."""
+
+    def test_report_contains_exit_code(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "job.log"
+        log_path.write_text("some output\nTraceback: error here")
+        job = _make_slurm_job(log_path=log_path)
+        task = MagicMock()
+        task.name = "task_example"
+
+        report = _process_nonzero_exit(task, job, exit_code=42)
+
+        assert report.exc_info is not None
+        exc = report.exc_info[1]
+        assert "exited with code 42" in str(exc)
+        assert "COMPLETED" in str(exc)
+
+    def test_log_content_included(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "job.log"
+        log_path.write_text("worker crashed here")
+        job = _make_slurm_job(log_path=log_path)
+        task = MagicMock()
+        task.name = "task_example"
+
+        report = _process_nonzero_exit(task, job, exit_code=1)
+
+        exc = report.exc_info[1]
+        assert "worker crashed here" in str(exc)
+        assert f"last {_LOG_TAIL_MAX_CHARS} chars" in str(exc)
+
+    def test_empty_log_message(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "nonexistent.log"
+        job = _make_slurm_job(log_path=log_path)
+        task = MagicMock()
+        task.name = "task_example"
+
+        report = _process_nonzero_exit(task, job, exit_code=137)
+
+        exc = report.exc_info[1]
+        assert "exited with code 137" in str(exc)
+        assert "empty or not yet available" in str(exc)

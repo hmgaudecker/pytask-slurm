@@ -6,27 +6,33 @@ from typing import Any
 
 from pytask import hookimpl
 
-_DEFAULT_UNKNOWN_TIMEOUT = 600
-
 
 @hookimpl
 def pytask_parse_config(config: dict[str, Any]) -> None:
     """Parse the configuration."""
     config["markers"]["slurm"] = (
-        "Override SLURM resources for a task"
-        " (partition, time, mem, cpus_per_task, account, qos)."
+        "Override SLURM resources for a task. Options: partition, time,"
+        " mem, cpus_per_task, account, qos, gpus. Pass extra=\"...\" for any other"
+        " sbatch option (e.g. extra=\"--constraint=a100 --mail-type=END\")."
     )
     config.setdefault("slurm", False)
+
+    # SLURM resource options — passed through to sbatch.  When None, the
+    # corresponding flag is omitted and SLURM uses the cluster's own default.
     config.setdefault("slurm_partition", None)
-    config.setdefault("slurm_time", "01:00:00")
-    config.setdefault("slurm_mem", "4G")
-    config.setdefault("slurm_cpus_per_task", 1)
-    config.setdefault("slurm_max_jobs", 100)
-    config.setdefault("slurm_poll_interval", 5.0)
+    config.setdefault("slurm_time", None)
+    config.setdefault("slurm_mem", None)
+    config.setdefault("slurm_cpus_per_task", None)
     config.setdefault("slurm_account", None)
     config.setdefault("slurm_qos", None)
+    config.setdefault("slurm_gpus", None)
     config.setdefault("slurm_extra", None)
-    config.setdefault("slurm_unknown_timeout", _DEFAULT_UNKNOWN_TIMEOUT)
+
+    # pytask-slurm executor parameters — control the plugin's own scheduling
+    # loop, not passed to sbatch.
+    config.setdefault("slurm_max_jobs", 50)
+    config.setdefault("slurm_poll_interval", 10)
+    config.setdefault("slurm_unknown_timeout", 300)
 
 
 @hookimpl(trylast=True)

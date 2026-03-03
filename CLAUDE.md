@@ -44,8 +44,9 @@ registers via the `pytask_slurm = "pytask_slurm.plugin"` entry-point.
   modules that pytask loaded dynamically
 - **Graceful degradation**: `poll_job_statuses()` and `cancel_jobs()` catch all
   exceptions so missing SLURM commands don't crash the scheduler
-- **Per-task overrides**: `@pytask.mark.slurm(mem="16G", cpus_per_task=4)` merges with
-  global CLI defaults; validated at submission time in `_get_slurm_options()`
+- **Per-task overrides**: `@pytask.mark.slurm(mem="16G", cpus_per_task=4)` overrides
+  `pyproject.toml` values; validated at submission time in `_get_slurm_options()`.
+  There are no built-in defaults — all options must be explicitly configured.
 
 ### Test structure
 

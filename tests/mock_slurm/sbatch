@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mock sbatch: parse --wrap command, run it in the background, return a fake job ID."""
+"""Mock sbatch: parse batch script or --wrap, run it, return a fake job ID."""
 # ruff: noqa: T201, S108, S602, SIM115, PTH123
 
 from __future__ import annotations
@@ -23,17 +23,40 @@ job_id = int(counter_file.read_text().strip()) + 1 if counter_file.exists() else
 
 counter_file.write_text(str(job_id))
 
-# Parse arguments to find --wrap and --output.
+# Parse arguments to find --wrap, --output, and a trailing script path.
 wrap_cmd = None
 log_path = None
+script_path = None
 for arg in sys.argv[1:]:
     if arg.startswith("--wrap="):
         wrap_cmd = arg[len("--wrap=") :]
     elif arg.startswith("--output="):
         log_path = arg[len("--output=") :]
+    elif not arg.startswith("-") and Path(arg).suffix == ".sh":
+        script_path = arg
 
-if wrap_cmd is None:
-    print("mock sbatch: no --wrap found", file=sys.stderr)
+# Determine the command to execute: prefer script_path, fall back to --wrap.
+if script_path is not None:
+    run_cmd = ["bash", script_path]
+    shell = False
+    # Extract result path from the script file.  The script's last line looks
+    # like: exec python -m pytask_slurm.runner 'payload' 'result'
+    result_path = ""
+    try:
+        for line in Path(script_path).read_text().splitlines():
+            if "pytask_slurm.runner" in line:
+                parts = shlex.split(line.replace("exec ", ""))
+                result_path = parts[-1] if len(parts) >= 2 else ""  # noqa: PLR2004
+                break
+    except OSError:
+        pass
+elif wrap_cmd is not None:
+    run_cmd = wrap_cmd
+    shell = True
+    parts = shlex.split(wrap_cmd)
+    result_path = parts[-1] if len(parts) >= 2 else ""  # noqa: PLR2004
+else:
+    print("mock sbatch: no --wrap or script found", file=sys.stderr)
     sys.exit(1)
 
 # Record the job so mock sacct can track it.
@@ -41,13 +64,8 @@ jobs: dict[str, dict[str, str]] = {}
 if jobs_file.exists():
     jobs = json.loads(jobs_file.read_text())
 
-# Extract result path from the wrap command to let sacct check completion.
-# The wrap command looks like: 'python' -m pytask_slurm.runner 'payload' 'result'
-parts = shlex.split(wrap_cmd)
-result_path = parts[-1] if len(parts) >= 2 else ""  # noqa: PLR2004
-
 jobs[str(job_id)] = {
-    "wrap_cmd": wrap_cmd,
+    "wrap_cmd": wrap_cmd or f"bash {script_path}",
     "result_path": result_path,
     "log_path": log_path or "",
     "status": "RUNNING",
@@ -55,14 +73,18 @@ jobs[str(job_id)] = {
 }
 jobs_file.write_text(json.dumps(jobs))
 
-# Run the wrap command directly (simulating SLURM executing the job).
+# Run the command directly (simulating SLURM executing the job).
 log_fh = open(log_path, "w") if log_path else subprocess.DEVNULL
 proc = subprocess.Popen(
-    wrap_cmd,
-    shell=True,
+    run_cmd,
+    shell=shell,
     stdout=log_fh,
     stderr=log_fh,
 )
+
+# Close the log file handle so the child process owns it exclusively.
+if log_fh is not subprocess.DEVNULL:
+    log_fh.close()
 
 # Store pid so we could cancel it.
 jobs[str(job_id)]["pid"] = str(proc.pid)

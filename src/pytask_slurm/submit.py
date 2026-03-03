@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import shlex
 import subprocess
 import sys
@@ -21,16 +20,12 @@ from pytask_parallel.utils import (
     strip_annotation_locals,
 )
 
-logger = logging.getLogger(__name__)
-
 if TYPE_CHECKING:
     from pytask import PTask
 
 _SLURM_MARK_KEYS = frozenset(
-    {"partition", "time", "mem", "cpus_per_task", "account", "qos"}
+    {"partition", "time", "mem", "cpus_per_task", "account", "qos", "gpus"}
 )
-_SLURM_INT_KEYS = frozenset({"cpus_per_task"})
-_NULLABLE_KEYS = frozenset({"partition", "account", "qos"})
 
 
 @dataclass(frozen=True)
@@ -56,44 +51,6 @@ class TaskPayload:
     show_locals: bool
     task_filterwarnings: list[Any]
     result_path: str
-    # Kept for backward compatibility: in-flight jobs serialized before the
-    # switch to a JSON sidecar file included sys_path in the payload.  The
-    # runner now reads the sidecar instead, so this field is ignored.
-    sys_path: list[str] | None = None
-
-
-def _validate_slurm_option(
-    key: str,
-    value: Any,  # noqa: ANN401
-    task_name: str,
-    source: str = "SLURM option",
-) -> None:
-    """Validate a single SLURM option value (type and range)."""
-    if key in _SLURM_INT_KEYS:
-        if isinstance(value, bool) or not isinstance(value, int):
-            msg = (
-                f"{source} {key!r} for task {task_name!r} "
-                f"must be an int, got {type(value).__name__}."
-            )
-            raise ValueError(msg)
-        if value <= 0:
-            msg = (
-                f"{source} {key!r} for task {task_name!r} "
-                f"must be a positive integer, got {value}."
-            )
-            raise ValueError(msg)
-    else:
-        if not isinstance(value, str):
-            msg = (
-                f"{source} {key!r} for task {task_name!r} "
-                f"must be a str, got {type(value).__name__}."
-            )
-            raise ValueError(msg)
-        if not value:
-            msg = (
-                f"{source} {key!r} for task {task_name!r} must not be an empty string."
-            )
-            raise ValueError(msg)
 
 
 def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
@@ -106,22 +63,25 @@ def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
         )
         raise ValueError(msg)
 
-    unknown = set(mark.kwargs) - _SLURM_MARK_KEYS
+    unknown = set(mark.kwargs) - _SLURM_MARK_KEYS - {"extra"}
     if unknown:
         msg = (
-            f"Unknown @pytask.mark.slurm kwargs for task {task_name!r}: "
-            f"{sorted(unknown)}. Allowed: {sorted(_SLURM_MARK_KEYS)}."
+            f"@pytask.mark.slurm for task {task_name!r} received unknown "
+            f"kwargs {sorted(unknown)}. Well-known options: "
+            f"{sorted(_SLURM_MARK_KEYS)}. Use extra=\"...\" for arbitrary "
+            f"sbatch flags."
         )
         raise ValueError(msg)
 
     for key, value in mark.kwargs.items():
+        if key == "extra":
+            continue
         if value is None:
             msg = (
                 f"@pytask.mark.slurm kwarg {key!r} for task {task_name!r} "
                 f"must not be None."
             )
             raise ValueError(msg)
-        _validate_slurm_option(key, value, task_name, source="@pytask.mark.slurm kwarg")
 
     return dict(mark.kwargs)
 
@@ -135,6 +95,8 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "cpus_per_task": session_config["slurm_cpus_per_task"],
         "account": session_config["slurm_account"],
         "qos": session_config["slurm_qos"],
+        "gpus": session_config["slurm_gpus"],
+        "extra": session_config["slurm_extra"],
     }
 
     marks = get_marks(task, "slurm")
@@ -146,129 +108,80 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         )
         raise ValueError(msg)
 
-    # Validate all non-None config values upfront (catches invalid config even
-    # when a mark overrides the key, so misconfigurations don't go unnoticed).
-    for key, value in options.items():
-        if value is not None:
-            _validate_slurm_option(key, value, task.name, source="Global config")
-
     if marks:
         options.update(_validate_mark(marks[0], task.name))
-
-    # time, mem, and cpus_per_task are always passed to sbatch unconditionally,
-    # so they must not be None after merging.  partition and account are
-    # optional (only appended when truthy), so None is valid for them.
-    for key in sorted(_SLURM_MARK_KEYS - _NULLABLE_KEYS):
-        if options[key] is None:
-            msg = f"SLURM option {key!r} for task {task.name!r} must not be None."
-            raise ValueError(msg)
 
     return options
 
 
-# Flags that _build_sbatch_cmd generates.  Used to warn when --slurm-extra
-# duplicates a flag that pytask-slurm already controls.  Even conditionally-
-# generated flags like --partition are included because the user may not realise
-# that both the dedicated option and --slurm-extra are active.
-_GENERATED_SBATCH_FLAGS = frozenset(
-    {
-        "--wrap",
-        "--output",
-        "--job-name",
-        "--time",
-        "--mem",
-        "--cpus-per-task",
-        "--partition",
-        "--account",
-        "--qos",
-    }
-)
+def _write_batch_script(
+    python: str,
+    payload_path: Path,
+    result_path: Path,
+    script_path: Path,
+) -> None:
+    """Write a SLURM batch script that runs the pytask runner.
 
-# Map short sbatch flags to their long-form equivalents so we can detect
-# conflicts regardless of which form the user passes.
-_SHORT_TO_LONG: dict[str, str] = {
-    "-o": "--output",
-    "-J": "--job-name",
-    "-t": "--time",
-    "-c": "--cpus-per-task",
-    "-p": "--partition",
-    "-A": "--account",
-    "-q": "--qos",
-}
+    Using a script file instead of ``--wrap`` avoids quoting issues and lets us
+    redirect stderr to stdout within the script so that all output (including
+    Python tracebacks) ends up in the single ``--output`` log file.
 
-
-def _resolve_short_flag(token: str) -> str | None:
-    """Return the long-form flag if *token* matches a short sbatch flag, else None.
-
-    Handles ``-p gpu``, ``-p=gpu``, and the combined form ``-pgpu``.
+    The script prints diagnostic lines before and after the Python command so
+    the log file is never empty — even if Python fails to start.
     """
-    flag = token.split("=")[0]
-    if flag in _SHORT_TO_LONG:
-        return flag
-    # Combined form: e.g. "-pgpu" starts with "-p".
-    for short in _SHORT_TO_LONG:
-        if token.startswith(short) and len(token) > len(short):
-            return short
-    return None
-
-
-def _warn_on_conflicting_extra(tokens: list[str]) -> None:
-    """Warn if --slurm-extra contains flags that are auto-generated by pytask-slurm."""
-    for token in tokens:
-        short = _resolve_short_flag(token)
-        flag = _SHORT_TO_LONG[short] if short is not None else token.split("=")[0]
-        if flag in _GENERATED_SBATCH_FLAGS:
-            logger.warning(
-                "--slurm-extra contains %r which conflicts with an auto-generated "
-                "sbatch flag. The resulting behavior depends on sbatch's handling "
-                "of duplicate flags.",
-                token.split("=")[0],
-            )
+    q_python = shlex.quote(python)
+    q_payload = shlex.quote(str(payload_path))
+    q_result = shlex.quote(str(result_path))
+    script_path.write_text(
+        f"#!/bin/bash\n"
+        f"# pytask-slurm batch script (auto-generated)\n"
+        f"exec 2>&1\n"
+        f'echo "pytask-slurm: starting (pid=$$, host=$(hostname))"\n'
+        f'echo "pytask-slurm: python={q_python}"\n'
+        f"{q_python} -m pytask_slurm.runner {q_payload} {q_result}\n"
+        f"_exit_code=$?\n"
+        f'echo "pytask-slurm: runner exited with code $_exit_code"\n'
+        f"exit $_exit_code\n"
+    )
+    script_path.chmod(0o755)
 
 
 def _build_sbatch_cmd(
     opts: dict[str, Any],
-    session_config: dict[str, Any],
     task_hash: str,
-    paths: tuple[Path, Path, Path],
+    *,
+    log_path: Path,
+    script_path: Path,
 ) -> list[str]:
-    """Build the sbatch command list from task options and config.
-
-    *paths* is ``(log_path, payload_path, result_path)``.
-    """
-    log_path, payload_path, result_path = paths
-
+    """Build the sbatch command list from task options."""
     cmd = [
         "sbatch",
         "--parsable",
         f"--job-name=pytask-{task_hash}",
-        f"--time={opts['time']}",
-        f"--mem={opts['mem']}",
-        f"--cpus-per-task={opts['cpus_per_task']}",
         f"--output={log_path}",
     ]
 
+    if opts["time"] is not None:
+        cmd.append(f"--time={opts['time']}")
+    if opts["mem"] is not None:
+        cmd.append(f"--mem={opts['mem']}")
+    if opts["cpus_per_task"] is not None:
+        cmd.append(f"--cpus-per-task={opts['cpus_per_task']}")
     if opts["partition"]:
         cmd.append(f"--partition={opts['partition']}")
     if opts["account"]:
         cmd.append(f"--account={opts['account']}")
     if opts["qos"]:
         cmd.append(f"--qos={opts['qos']}")
+    if opts["gpus"] is not None:
+        cmd.append(f"--gpus={opts['gpus']}")
 
-    extra = session_config["slurm_extra"]
+    # Append extra sbatch flags (merged: config default, overridden by mark).
+    extra = opts.get("extra")
     if extra:
-        if not isinstance(extra, str):
-            msg = f"slurm_extra must be a string, got {type(extra).__name__}"
-            raise TypeError(msg)
-        extra_tokens = shlex.split(extra)
-        _warn_on_conflicting_extra(extra_tokens)
-        cmd.extend(extra_tokens)
+        cmd.extend(shlex.split(extra))
 
-    runner_cmd = (
-        f"{shlex.quote(str(sys.executable))} -m pytask_slurm.runner"
-        f" {shlex.quote(str(payload_path))} {shlex.quote(str(result_path))}"
-    )
-    cmd.append(f"--wrap={runner_cmd}")
+    cmd.append(str(script_path))
     return cmd
 
 
@@ -326,10 +239,15 @@ def submit_task(
     with payload_path.open("wb") as f:
         cloudpickle.dump(payload, f)
 
-    # Build sbatch command using merged per-task + global options.
+    script_path = work_dir / f"{task_hash}_job.sh"
+    _write_batch_script(sys.executable, payload_path, result_path, script_path)
+
     opts = _get_slurm_options(task, session_config)
     cmd = _build_sbatch_cmd(
-        opts, session_config, task_hash, (log_path, payload_path, result_path)
+        opts,
+        task_hash,
+        log_path=log_path,
+        script_path=script_path,
     )
 
     result = subprocess.run(  # noqa: S603
