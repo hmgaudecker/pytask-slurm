@@ -132,12 +132,18 @@ def _write_batch_script(
     q_python = shlex.quote(python)
     q_payload = shlex.quote(str(payload_path))
     q_result = shlex.quote(str(result_path))
+    # `JAX_PLATFORMS` is sometimes set on the submitting host to work
+    # around login-node JAX-CUDA init segfaults. sbatch propagates the
+    # submitting env by default, which would force the worker onto CPU
+    # even on a GPU compute node. Scrub it so the worker autodetects
+    # its own platform.
     script_path.write_text(
         f"#!/bin/bash\n"
         f"# pytask-slurm batch script (auto-generated)\n"
         f"exec 2>&1\n"
         f'echo "pytask-slurm: starting (pid=$$, host=$(hostname))"\n'
         f'echo "pytask-slurm: python={q_python}"\n'
+        f"unset JAX_PLATFORMS\n"
         f"{q_python} -m pytask_slurm.runner {q_payload} {q_result}\n"
         f"_exit_code=$?\n"
         f'echo "pytask-slurm: runner exited with code $_exit_code"\n'

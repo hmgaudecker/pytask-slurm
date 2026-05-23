@@ -303,3 +303,19 @@ class TestWriteBatchScript:
             "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
         )
         assert os.access(script, os.X_OK)
+
+    def test_scrubs_jax_platforms_before_runner(self, tmp_path: Path) -> None:
+        """`JAX_PLATFORMS` is unset before the worker runs.
+
+        Login-node JAX-CUDA workarounds shouldn't bleed into compute-node
+        workers via sbatch env propagation.
+        """
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
+        )
+        content = script.read_text()
+        unset_pos = content.find("unset JAX_PLATFORMS")
+        runner_pos = content.find("-m pytask_slurm.runner")
+        assert unset_pos != -1
+        assert unset_pos < runner_pos
