@@ -12,8 +12,8 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     """Parse the configuration."""
     config["markers"]["slurm"] = (
         "Override SLURM resources for a task. Options: partition, time,"
-        " mem, cpus_per_task, account, qos, gpus. Pass extra=\"...\" for any other"
-        " sbatch option (e.g. extra=\"--constraint=a100 --mail-type=END\")."
+        ' mem, cpus_per_task, account, qos, gpus. Pass extra="..." for any other'
+        ' sbatch option (e.g. extra="--constraint=a100 --mail-type=END").'
     )
     config.setdefault("slurm", False)
 

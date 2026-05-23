@@ -85,9 +85,7 @@ class TestIsActionableStatus:
 class TestCheckResultFileFallback:
     def _make_session(self) -> MagicMock:
         session = MagicMock()
-        session.dag.nodes.__getitem__.return_value = {
-            "task": MagicMock(),
-        }
+        session.dag.nodes.__getitem__.return_value = MagicMock()
         return session
 
     @patch("pytask_slurm.execute._process_completed_job")

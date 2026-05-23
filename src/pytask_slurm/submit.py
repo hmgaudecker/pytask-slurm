@@ -68,7 +68,7 @@ def _validate_mark(mark: Any, task_name: str) -> dict[str, Any]:  # noqa: ANN401
         msg = (
             f"@pytask.mark.slurm for task {task_name!r} received unknown "
             f"kwargs {sorted(unknown)}. Well-known options: "
-            f"{sorted(_SLURM_MARK_KEYS)}. Use extra=\"...\" for arbitrary "
+            f'{sorted(_SLURM_MARK_KEYS)}. Use extra="..." for arbitrary '
             f"sbatch flags."
         )
         raise ValueError(msg)

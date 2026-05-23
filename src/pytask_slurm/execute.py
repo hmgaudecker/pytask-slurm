@@ -16,7 +16,7 @@ from pytask.tree_util import tree_leaves, tree_map, tree_structure
 from pytask_parallel.typing import CarryOverPath
 
 from pytask_slurm.cancel import cancel_jobs
-from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus, poll_job_statuses
+from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
 from pytask_slurm.submit import SlurmJob, submit_task
 
 if TYPE_CHECKING:
@@ -119,7 +119,7 @@ def _submit_ready_tasks(
     ready_tasks = list(session.scheduler.get_ready(n_new_tasks))
 
     for task_name in ready_tasks:
-        task = session.dag.nodes[task_name]["task"]
+        task = session.dag.nodes[task_name]
         session.hook.pytask_execute_task_log_start(session=session, task=task)
         try:
             session.hook.pytask_execute_task_setup(session=session, task=task)
@@ -193,7 +193,7 @@ def _check_result_file_fallback(
                 slurm_job.job_id,
                 task_name,
             )
-            task = session.dag.nodes[task_name]["task"]
+            task = session.dag.nodes[task_name]
             reports.append(_process_completed_job(session, task, slurm_job))
             fallback_task_names.append(task_name)
     return reports, fallback_task_names
@@ -230,7 +230,7 @@ def _collect_completed_jobs(
         if not _is_actionable_status(job_result.status, slurm_job, unknown_timeout):
             continue
 
-        task = session.dag.nodes[task_name]["task"]
+        task = session.dag.nodes[task_name]
         if job_result.status == SlurmJobStatus.COMPLETED:
             if job_result.exit_code is not None and job_result.exit_code != 0:
                 report = _process_nonzero_exit(task, slurm_job, job_result.exit_code)

@@ -182,7 +182,9 @@ class TestSqueueFallback:
             ]
             result = poll_job_statuses(["500"])
 
-        assert result == {"500": SlurmJobResult(SlurmJobStatus.COMPLETED, exit_code=None)}
+        assert result == {
+            "500": SlurmJobResult(SlurmJobStatus.COMPLETED, exit_code=None)
+        }
 
     def test_returns_empty_when_both_fail(self) -> None:
         with patch("pytask_slurm.monitor.subprocess.run") as mock_run:
@@ -226,7 +228,9 @@ class TestSqueueFallback:
             mock_run.side_effect = [sacct_result, squeue_result]
             result = poll_job_statuses(["1001"])
 
-        assert result == {"1001": SlurmJobResult(SlurmJobStatus.RUNNING, exit_code=None)}
+        assert result == {
+            "1001": SlurmJobResult(SlurmJobStatus.RUNNING, exit_code=None)
+        }
         assert mock_run.call_count == 2  # noqa: PLR2004
         assert mock_run.call_args_list[0][0][0][0] == "sacct"
         assert mock_run.call_args_list[1][0][0][0] == "squeue"
