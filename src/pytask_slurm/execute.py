@@ -53,9 +53,15 @@ def _refresh_nfs_cache(directory: Path) -> None:
         pass
 
 
-@hookimpl
+@hookimpl(tryfirst=True)
 def pytask_execute_build(session: Session) -> bool | None:
     """Execute tasks by submitting them as SLURM jobs.
+
+    `tryfirst=True` ensures this hook runs before any other
+    `pytask_execute_build` impl (notably `pytask-parallel`'s, which is
+    also registered when both plugins are active). Returning a non-None
+    value short-circuits pluggy's hook chain, so pytask-parallel never
+    gets to dispatch the same ready tasks to its local process pool.
 
     Three-phase loop (same structure as pytask-parallel):
     1. Submit ready tasks via sbatch (up to max_jobs).
