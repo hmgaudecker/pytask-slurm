@@ -11,9 +11,10 @@ from pytask import hookimpl
 def pytask_parse_config(config: dict[str, Any]) -> None:
     """Parse the configuration."""
     config["markers"]["slurm"] = (
-        "Override SLURM resources for a task. Options: partition, time,"
-        ' mem, cpus_per_task, account, qos, gpus. Pass extra="..." for any other'
-        ' sbatch option (e.g. extra="--constraint=a100 --mail-type=END").'
+        "Override SLURM resources for a task. Options: partition, time, mem,"
+        " cpus_per_task, account, qos, gpus, python_unbuffered. Pass"
+        ' extra="..." for any other sbatch option (e.g.'
+        ' extra="--constraint=a100 --mail-type=END").'
     )
     config.setdefault("slurm", False)
 
@@ -27,6 +28,11 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     config.setdefault("slurm_qos", None)
     config.setdefault("slurm_gpus", None)
     config.setdefault("slurm_extra", None)
+    # When True, the batch script exports `PYTHONUNBUFFERED=1` before the
+    # runner. Compute-node stdout is a file (not a TTY), so Python defaults
+    # to block-buffered I/O and per-period log lines only land at process
+    # exit. Opt in per-task when live progress visibility matters.
+    config.setdefault("slurm_python_unbuffered", False)
 
     # pytask-slurm executor parameters — control the plugin's own scheduling
     # loop, not passed to sbatch.

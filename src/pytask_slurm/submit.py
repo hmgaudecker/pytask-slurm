@@ -24,7 +24,16 @@ if TYPE_CHECKING:
     from pytask import PTask
 
 _SLURM_MARK_KEYS = frozenset(
-    {"partition", "time", "mem", "cpus_per_task", "account", "qos", "gpus"}
+    {
+        "partition",
+        "time",
+        "mem",
+        "cpus_per_task",
+        "account",
+        "qos",
+        "gpus",
+        "python_unbuffered",
+    }
 )
 
 
@@ -97,6 +106,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "qos": session_config["slurm_qos"],
         "gpus": session_config["slurm_gpus"],
         "extra": session_config["slurm_extra"],
+        "python_unbuffered": session_config["slurm_python_unbuffered"],
     }
 
     marks = get_marks(task, "slurm")
@@ -119,6 +129,8 @@ def _write_batch_script(
     payload_path: Path,
     result_path: Path,
     script_path: Path,
+    *,
+    python_unbuffered: bool = False,
 ) -> None:
     """Write a SLURM batch script that runs the pytask runner.
 
@@ -128,6 +140,12 @@ def _write_batch_script(
 
     The script prints diagnostic lines before and after the Python command so
     the log file is never empty — even if Python fails to start.
+
+    `python_unbuffered=True` exports ``PYTHONUNBUFFERED=1`` before the runner.
+    Worker stdout on a compute node is a file, not a TTY, so Python defaults
+    to block-buffered I/O; without the flag the worker's per-period log lines
+    only land in the log file at process exit. Set it when the task's log
+    level needs live progress visibility.
     """
     q_python = shlex.quote(python)
     q_payload = shlex.quote(str(payload_path))
@@ -137,6 +155,7 @@ def _write_batch_script(
     # submitting env by default, which would force the worker onto CPU
     # even on a GPU compute node. Scrub it so the worker autodetects
     # its own platform.
+    unbuffered_line = "export PYTHONUNBUFFERED=1\n" if python_unbuffered else ""
     script_path.write_text(
         f"#!/bin/bash\n"
         f"# pytask-slurm batch script (auto-generated)\n"
@@ -144,6 +163,7 @@ def _write_batch_script(
         f'echo "pytask-slurm: starting (pid=$$, host=$(hostname))"\n'
         f'echo "pytask-slurm: python={q_python}"\n'
         f"unset JAX_PLATFORMS\n"
+        f"{unbuffered_line}"
         f"{q_python} -m pytask_slurm.runner {q_payload} {q_result}\n"
         f"_exit_code=$?\n"
         f'echo "pytask-slurm: runner exited with code $_exit_code"\n'
@@ -245,10 +265,16 @@ def submit_task(
     with payload_path.open("wb") as f:
         cloudpickle.dump(payload, f)
 
-    script_path = work_dir / f"{task_hash}_job.sh"
-    _write_batch_script(sys.executable, payload_path, result_path, script_path)
-
     opts = _get_slurm_options(task, session_config)
+
+    script_path = work_dir / f"{task_hash}_job.sh"
+    _write_batch_script(
+        sys.executable,
+        payload_path,
+        result_path,
+        script_path,
+        python_unbuffered=bool(opts.get("python_unbuffered")),
+    )
     cmd = _build_sbatch_cmd(
         opts,
         task_hash,

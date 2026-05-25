@@ -25,6 +25,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_qos": None,
     "slurm_gpus": None,
     "slurm_extra": None,
+    "slurm_python_unbuffered": False,
 }
 
 
@@ -319,3 +320,31 @@ class TestWriteBatchScript:
         runner_pos = content.find("-m pytask_slurm.runner")
         assert unset_pos != -1
         assert unset_pos < runner_pos
+
+    def test_python_unbuffered_false_omits_export(self, tmp_path: Path) -> None:
+        """`python_unbuffered=False` leaves PYTHONUNBUFFERED unset."""
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3",
+            tmp_path / "p.pkl",
+            tmp_path / "r.pkl",
+            script,
+            python_unbuffered=False,
+        )
+        assert "PYTHONUNBUFFERED" not in script.read_text()
+
+    def test_python_unbuffered_true_exports_env(self, tmp_path: Path) -> None:
+        """`python_unbuffered=True` exports PYTHONUNBUFFERED=1 before the runner."""
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3",
+            tmp_path / "p.pkl",
+            tmp_path / "r.pkl",
+            script,
+            python_unbuffered=True,
+        )
+        content = script.read_text()
+        export_pos = content.find("export PYTHONUNBUFFERED=1")
+        runner_pos = content.find("-m pytask_slurm.runner")
+        assert export_pos != -1
+        assert export_pos < runner_pos
