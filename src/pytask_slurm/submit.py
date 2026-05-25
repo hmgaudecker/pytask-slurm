@@ -33,6 +33,7 @@ _SLURM_MARK_KEYS = frozenset(
         "qos",
         "gpus",
         "python_unbuffered",
+        "env",
     }
 )
 
@@ -107,6 +108,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "gpus": session_config["slurm_gpus"],
         "extra": session_config["slurm_extra"],
         "python_unbuffered": session_config["slurm_python_unbuffered"],
+        "env": dict(session_config.get("slurm_env") or {}),
     }
 
     marks = get_marks(task, "slurm")
@@ -119,7 +121,12 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         raise ValueError(msg)
 
     if marks:
-        options.update(_validate_mark(marks[0], task.name))
+        mark_kwargs = _validate_mark(marks[0], task.name)
+        # `env` merges with session defaults rather than replacing them.
+        mark_env = mark_kwargs.pop("env", None)
+        options.update(mark_kwargs)
+        if mark_env is not None:
+            options["env"] = {**options["env"], **dict(mark_env)}
 
     return options
 
@@ -131,6 +138,7 @@ def _write_batch_script(
     script_path: Path,
     *,
     python_unbuffered: bool = False,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Write a SLURM batch script that runs the pytask runner.
 
@@ -146,6 +154,16 @@ def _write_batch_script(
     to block-buffered I/O; without the flag the worker's per-period log lines
     only land in the log file at process exit. Set it when the task's log
     level needs live progress visibility.
+
+    `env` exports arbitrary environment variables before the runner. Values
+    pass through ``shlex.quote`` so spaces and shell metacharacters are
+    preserved verbatim; references like ``$SLURM_JOB_ID`` are intentionally
+    NOT pre-expanded here so the worker shell evaluates them on the compute
+    node (this is the standard way to derive a node-local, per-job path).
+    Use this slot for backend-specific tuning that pylcm/JAX/XLA read at
+    process start: ``XLA_PYTHON_CLIENT_MEM_FRACTION``,
+    ``XLA_PYTHON_CLIENT_ALLOCATOR``, ``XLA_FLAGS``,
+    ``JAX_COMPILATION_CACHE_DIR``, etc.
     """
     q_python = shlex.quote(python)
     q_payload = shlex.quote(str(payload_path))
@@ -156,6 +174,10 @@ def _write_batch_script(
     # even on a GPU compute node. Scrub it so the worker autodetects
     # its own platform.
     unbuffered_line = "export PYTHONUNBUFFERED=1\n" if python_unbuffered else ""
+    env_lines = ""
+    if env:
+        for key, value in env.items():
+            env_lines += f"export {key}={shlex.quote(str(value))}\n"
     script_path.write_text(
         f"#!/bin/bash\n"
         f"# pytask-slurm batch script (auto-generated)\n"
@@ -164,6 +186,7 @@ def _write_batch_script(
         f'echo "pytask-slurm: python={q_python}"\n'
         f"unset JAX_PLATFORMS\n"
         f"{unbuffered_line}"
+        f"{env_lines}"
         f"{q_python} -m pytask_slurm.runner {q_payload} {q_result}\n"
         f"_exit_code=$?\n"
         f'echo "pytask-slurm: runner exited with code $_exit_code"\n'
@@ -274,6 +297,7 @@ def submit_task(
         result_path,
         script_path,
         python_unbuffered=bool(opts.get("python_unbuffered")),
+        env=opts.get("env") or None,
     )
     cmd = _build_sbatch_cmd(
         opts,

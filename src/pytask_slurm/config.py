@@ -33,6 +33,14 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     # to block-buffered I/O and per-period log lines only land at process
     # exit. Opt in per-task when live progress visibility matters.
     config.setdefault("slurm_python_unbuffered", False)
+    # Per-task environment variables, exported in the batch script before the
+    # runner starts. Use for backend tuning that JAX/XLA/pylcm read at process
+    # start — typical entries: `JAX_COMPILATION_CACHE_DIR`,
+    # `XLA_PYTHON_CLIENT_MEM_FRACTION`, `XLA_PYTHON_CLIENT_ALLOCATOR`,
+    # `XLA_FLAGS`. Values pass through `shlex.quote`, but shell references
+    # like `$SLURM_JOB_ID` survive unexpanded so the worker shell evaluates
+    # them on the compute node (handy for node-local cache paths).
+    config.setdefault("slurm_env", {})
 
     # pytask-slurm executor parameters — control the plugin's own scheduling
     # loop, not passed to sbatch.
