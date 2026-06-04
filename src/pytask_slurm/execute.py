@@ -7,7 +7,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import cloudpickle
 from _pytask.node_protocols import PPathNode
@@ -16,7 +16,7 @@ from pytask.tree_util import tree_leaves, tree_map, tree_structure
 from pytask_parallel.typing import CarryOverPath
 
 from pytask_slurm.cancel import cancel_jobs
-from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
+from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus, poll_job_statuses
 from pytask_slurm.submit import SlurmJob, submit_task
 
 if TYPE_CHECKING:
@@ -236,15 +236,8 @@ def _collect_completed_jobs(
         if not _is_actionable_status(job_result.status, slurm_job, unknown_timeout):
             continue
 
-        task = session.dag.nodes[task_name]
-        if job_result.status == SlurmJobStatus.COMPLETED:
-            if job_result.exit_code is not None and job_result.exit_code != 0:
-                report = _process_nonzero_exit(task, slurm_job, job_result.exit_code)
-            else:
-                report = _process_completed_job(session, task, slurm_job)
-        else:
-            report = _process_failed_job(task, slurm_job, job_result.status)
-
+        task = cast("PTask", session.dag.nodes[task_name])
+        report = _build_terminal_report(session, task, slurm_job, job_result)
         newly_collected.append(report)
         completed_task_names.append(task_name)
 
@@ -274,6 +267,50 @@ def _process_reports(
         session.hook.pytask_execute_task_process_report(session=session, report=report)
         session.hook.pytask_execute_task_log_end(session=session, report=report)
         reports.append(report)
+
+
+def _build_terminal_report(
+    session: Session,
+    task: PTask,
+    slurm_job: SlurmJob,
+    job_result: SlurmJobResult,
+) -> ExecutionReport:
+    """Build the execution report for a job that has reached a terminal state.
+
+    A task that raised records its structured traceback in the result pickle and
+    exits non-zero, so a failed job is reported from that pickle when present; only
+    a job killed before writing one falls back to the SLURM-state / log-tail report.
+    """
+    if job_result.status == SlurmJobStatus.COMPLETED:
+        exit_code = job_result.exit_code
+        if exit_code is None or exit_code == 0:
+            return _process_completed_job(session, task, slurm_job)
+        return _read_result_report(session, task, slurm_job) or _process_nonzero_exit(
+            task, slurm_job, exit_code
+        )
+    return _read_result_report(session, task, slurm_job) or _process_failed_job(
+        task, slurm_job, job_result.status
+    )
+
+
+def _read_result_report(
+    session: Session,
+    task: PTask,
+    slurm_job: SlurmJob,
+) -> ExecutionReport | None:
+    """Return the report from this run's result pickle, or None to fall back.
+
+    A non-zero exit or a non-COMPLETED status means the job failed. The common case
+    is a task that raised: the runner records the traceback in the result pickle and
+    exits non-zero, so reading that pickle surfaces the real exception (the same
+    detail as a clean run). `submit_task` removes any stale pickle before submitting,
+    so a present pickle always belongs to this run. Returns None when no pickle was
+    written — the job was killed mid-task by OOM or timeout — so the caller falls back
+    to the SLURM-state / log-tail report.
+    """
+    if slurm_job.result_path.exists() and _result_file_is_stable(slurm_job.result_path):
+        return _process_completed_job(session, task, slurm_job)
+    return None
 
 
 def _process_completed_job(
