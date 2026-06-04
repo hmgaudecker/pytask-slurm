@@ -348,3 +348,31 @@ class TestWriteBatchScript:
         runner_pos = content.find("-m pytask_slurm.runner")
         assert export_pos != -1
         assert export_pos < runner_pos
+
+    def _env_script(self, tmp_path: Path, env: dict[str, str]) -> str:
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3",
+            tmp_path / "p.pkl",
+            tmp_path / "r.pkl",
+            script,
+            env=env,
+        )
+        return script.read_text()
+
+    def test_env_shell_variable_reaches_script_unescaped(self, tmp_path: Path) -> None:
+        """`$SLURM_JOB_ID` is emitted literally so the worker shell expands it."""
+        content = self._env_script(
+            tmp_path, {"JAX_COMPILATION_CACHE_DIR": "/tmp/c-$SLURM_JOB_ID"}
+        )
+        assert 'export JAX_COMPILATION_CACHE_DIR="/tmp/c-$SLURM_JOB_ID"' in content
+
+    def test_env_value_is_not_single_quoted(self, tmp_path: Path) -> None:
+        """The value is not single-quoted, which would suppress expansion."""
+        content = self._env_script(tmp_path, {"FOO": "/tmp/x-$SLURM_JOB_ID"})
+        assert "'/tmp/x-$SLURM_JOB_ID'" not in content
+
+    def test_env_value_spaces_preserved(self, tmp_path: Path) -> None:
+        """A value with spaces stays a single argument via double quoting."""
+        content = self._env_script(tmp_path, {"XLA_FLAGS": "--a=1 --b="})
+        assert 'export XLA_FLAGS="--a=1 --b="' in content

@@ -131,6 +131,19 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
     return options
 
 
+def _quote_env_value(value: str) -> str:
+    """Quote an env value for a job-script ``export``, keeping shell-variable expansion.
+
+    Wraps the value in double quotes so the worker shell expands references like
+    ``$SLURM_JOB_ID`` at job runtime (which ``shlex.quote``'s single quotes would
+    suppress) while still preserving spaces. Backslashes, double quotes, and
+    backticks are escaped so a value cannot break out of the quoting; ``$`` is left
+    active so expansion works.
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+    return f'"{escaped}"'
+
+
 def _write_batch_script(
     python: str,
     payload_path: Path,
@@ -156,11 +169,11 @@ def _write_batch_script(
     level needs live progress visibility.
 
     `env` exports arbitrary environment variables before the runner. Values
-    pass through ``shlex.quote`` so spaces and shell metacharacters are
-    preserved verbatim; references like ``$SLURM_JOB_ID`` are intentionally
-    NOT pre-expanded here so the worker shell evaluates them on the compute
-    node (this is the standard way to derive a node-local, per-job path).
-    Use this slot for backend-specific tuning that pylcm/JAX/XLA read at
+    are wrapped in double quotes so spaces are preserved while shell-variable
+    references like ``$SLURM_JOB_ID`` expand on the compute node — the standard
+    way to derive a node-local, per-job path. (Single-quoting via ``shlex.quote``
+    would suppress that expansion, leaving the literal ``$SLURM_JOB_ID`` in the
+    value.) Use this slot for backend-specific tuning that pylcm/JAX/XLA read at
     process start: ``XLA_PYTHON_CLIENT_MEM_FRACTION``,
     ``XLA_PYTHON_CLIENT_ALLOCATOR``, ``XLA_FLAGS``,
     ``JAX_COMPILATION_CACHE_DIR``, etc.
@@ -177,7 +190,7 @@ def _write_batch_script(
     env_lines = ""
     if env:
         for key, value in env.items():
-            env_lines += f"export {key}={shlex.quote(str(value))}\n"
+            env_lines += f"export {key}={_quote_env_value(str(value))}\n"
     script_path.write_text(
         f"#!/bin/bash\n"
         f"# pytask-slurm batch script (auto-generated)\n"
