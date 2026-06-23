@@ -28,6 +28,11 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     config.setdefault("slurm_qos", None)
     config.setdefault("slurm_gpus", None)
     config.setdefault("slurm_extra", None)
+    # Prefix inserted into the sbatch job name (`pytask-<prefix>-<hash>`). Two
+    # projects whose tasks hash identically otherwise share one job name, so a
+    # name- or user-scoped `scancel` cleaning up one cancels the other's jobs;
+    # a per-project prefix keeps them distinct.
+    config.setdefault("slurm_job_name_prefix", None)
     # When True, the batch script exports `PYTHONUNBUFFERED=1` before the
     # runner. Compute-node stdout is a file (not a TTY), so Python defaults
     # to block-buffered I/O and per-period log lines only land at process

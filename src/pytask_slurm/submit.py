@@ -108,6 +108,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "gpus": session_config["slurm_gpus"],
         "extra": session_config["slurm_extra"],
         "python_unbuffered": session_config["slurm_python_unbuffered"],
+        "job_name_prefix": session_config["slurm_job_name_prefix"],
         "env": dict(session_config.get("slurm_env") or {}),
     }
 
@@ -216,10 +217,12 @@ def _build_sbatch_cmd(
     script_path: Path,
 ) -> list[str]:
     """Build the sbatch command list from task options."""
+    prefix = opts.get("job_name_prefix")
+    job_name = f"pytask-{prefix}-{task_hash}" if prefix else f"pytask-{task_hash}"
     cmd = [
         "sbatch",
         "--parsable",
-        f"--job-name=pytask-{task_hash}",
+        f"--job-name={job_name}",
         f"--output={log_path}",
     ]
 

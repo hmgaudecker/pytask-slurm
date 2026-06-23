@@ -26,6 +26,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_gpus": None,
     "slurm_extra": None,
     "slurm_python_unbuffered": False,
+    "slurm_job_name_prefix": None,
 }
 
 
@@ -184,6 +185,22 @@ class TestBuildSbatchCmd:
         assert cmd[0] == "sbatch"
         assert "--parsable" in cmd
         assert "--job-name=pytask-abc123" in cmd
+
+    def test_no_prefix_keeps_bare_job_name(self, tmp_path: Path) -> None:
+        """Without a configured prefix the name stays `pytask-<hash>`."""
+        cmd = _sbatch_cmd(tmp_path)
+        assert "--job-name=pytask-abc123" in cmd
+
+    def test_job_name_prefix_namespaces_the_name(self, tmp_path: Path) -> None:
+        """A configured prefix namespaces the job name.
+
+        Two projects whose tasks hash identically otherwise share one job name, so
+        a name- or user-scoped `scancel` cleaning up one project cancels the other's
+        jobs too; the prefix keeps the names distinct.
+        """
+        opts = {**_FULL_OPTS, "job_name_prefix": "aca"}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--job-name=pytask-aca-abc123" in cmd
         assert "--time=02:00:00" in cmd
         assert "--mem=8G" in cmd
         assert "--cpus-per-task=4" in cmd
