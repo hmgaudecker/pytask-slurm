@@ -4,17 +4,64 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from pytask import Mark
 
+from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus
 from pytask_slurm.submit import (
     _build_sbatch_cmd,
     _get_slurm_options,
     _write_batch_script,
+    compute_task_hash,
+    reattach_task,
 )
+
+
+class TestReattach:
+    """Re-attach a restarted controller to its already-submitted job."""
+
+    def test_no_record_returns_none(self, tmp_path: Path) -> None:
+        """With no persisted job-id, re-attach yields nothing (submit fresh)."""
+        task = SimpleNamespace(name="task_estimate_parameters")
+        assert reattach_task(task, tmp_path) is None  # type: ignore[arg-type]
+
+    def test_active_job_reattaches_without_resubmitting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A persisted job still running is re-attached, paths reconstructed."""
+        task = SimpleNamespace(name="task_estimate_parameters")
+        task_hash = compute_task_hash("task_estimate_parameters")
+        (tmp_path / f"{task_hash}.jobid").write_text("424242")
+        monkeypatch.setattr(
+            "pytask_slurm.submit.poll_job_statuses",
+            lambda _ids: {"424242": SlurmJobResult(status=SlurmJobStatus.RUNNING)},
+        )
+
+        job = reattach_task(task, tmp_path)  # type: ignore[arg-type]
+
+        assert job is not None
+        assert job.job_id == "424242"
+        assert job.result_path == tmp_path / f"{task_hash}_result.pkl"
+
+    def test_terminal_job_clears_stale_record_and_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A persisted job that already finished is stale: clear it, submit fresh."""
+        task = SimpleNamespace(name="task_estimate_parameters")
+        jobid = tmp_path / f"{compute_task_hash('task_estimate_parameters')}.jobid"
+        jobid.write_text("424242")
+        monkeypatch.setattr(
+            "pytask_slurm.submit.poll_job_statuses",
+            lambda _ids: {"424242": SlurmJobResult(status=SlurmJobStatus.COMPLETED)},
+        )
+
+        assert reattach_task(task, tmp_path) is None  # type: ignore[arg-type]
+        assert not jobid.exists()
+
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_partition": "default",
@@ -26,6 +73,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_gpus": None,
     "slurm_extra": None,
     "slurm_python_unbuffered": False,
+    "slurm_job_name_prefix": None,
 }
 
 
@@ -184,6 +232,22 @@ class TestBuildSbatchCmd:
         assert cmd[0] == "sbatch"
         assert "--parsable" in cmd
         assert "--job-name=pytask-abc123" in cmd
+
+    def test_no_prefix_keeps_bare_job_name(self, tmp_path: Path) -> None:
+        """Without a configured prefix the name stays `pytask-<hash>`."""
+        cmd = _sbatch_cmd(tmp_path)
+        assert "--job-name=pytask-abc123" in cmd
+
+    def test_job_name_prefix_namespaces_the_name(self, tmp_path: Path) -> None:
+        """A configured prefix namespaces the job name.
+
+        Two projects whose tasks hash identically otherwise share one job name, so
+        a name- or user-scoped `scancel` cleaning up one project cancels the other's
+        jobs too; the prefix keeps the names distinct.
+        """
+        opts = {**_FULL_OPTS, "job_name_prefix": "aca"}
+        cmd = _sbatch_cmd(tmp_path, opts=opts)
+        assert "--job-name=pytask-aca-abc123" in cmd
         assert "--time=02:00:00" in cmd
         assert "--mem=8G" in cmd
         assert "--cpus-per-task=4" in cmd
@@ -348,3 +412,31 @@ class TestWriteBatchScript:
         runner_pos = content.find("-m pytask_slurm.runner")
         assert export_pos != -1
         assert export_pos < runner_pos
+
+    def _env_script(self, tmp_path: Path, env: dict[str, str]) -> str:
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3",
+            tmp_path / "p.pkl",
+            tmp_path / "r.pkl",
+            script,
+            env=env,
+        )
+        return script.read_text()
+
+    def test_env_shell_variable_reaches_script_unescaped(self, tmp_path: Path) -> None:
+        """`$SLURM_JOB_ID` is emitted literally so the worker shell expands it."""
+        content = self._env_script(
+            tmp_path, {"JAX_COMPILATION_CACHE_DIR": "/tmp/c-$SLURM_JOB_ID"}
+        )
+        assert 'export JAX_COMPILATION_CACHE_DIR="/tmp/c-$SLURM_JOB_ID"' in content
+
+    def test_env_value_is_not_single_quoted(self, tmp_path: Path) -> None:
+        """The value is not single-quoted, which would suppress expansion."""
+        content = self._env_script(tmp_path, {"FOO": "/tmp/x-$SLURM_JOB_ID"})
+        assert "'/tmp/x-$SLURM_JOB_ID'" not in content
+
+    def test_env_value_spaces_preserved(self, tmp_path: Path) -> None:
+        """A value with spaces stays a single argument via double quoting."""
+        content = self._env_script(tmp_path, {"XLA_FLAGS": "--a=1 --b="})
+        assert 'export XLA_FLAGS="--a=1 --b="' in content

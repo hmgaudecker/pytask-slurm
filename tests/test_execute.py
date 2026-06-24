@@ -6,18 +6,24 @@ import logging
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import cloudpickle
 import pytest
+from pytask import console
 
 from pytask_slurm.execute import (
     _LOG_TAIL_MAX_CHARS,
+    _cancel_remaining_jobs,
     _check_result_file_fallback,
     _is_actionable_status,
     _process_nonzero_exit,
+    _read_result_report,
     _result_file_is_stable,
 )
 from pytask_slurm.monitor import SlurmJobStatus
+from pytask_slurm.runner import run_task
 from pytask_slurm.submit import SlurmJob
 
 
@@ -36,6 +42,26 @@ def _make_slurm_job(
         log_path=log_path or Path("/fake/job.log"),
         submitted_at=submitted_at,
     )
+
+
+class TestCancelRemainingJobs:
+    """Cancel-on-exit is opt-out so long runs survive a controller death."""
+
+    def test_cancels_running_jobs_by_default(self) -> None:
+        session = MagicMock()
+        session.config = {"slurm_cancel_on_exit": True}
+        running = {"t": _make_slurm_job(job_id="999")}
+        with patch("pytask_slurm.execute.cancel_jobs") as cancel:
+            _cancel_remaining_jobs(session, running)
+        cancel.assert_called_once_with(["999"])
+
+    def test_leaves_jobs_running_when_opted_out(self) -> None:
+        session = MagicMock()
+        session.config = {"slurm_cancel_on_exit": False}
+        running = {"t": _make_slurm_job(job_id="999")}
+        with patch("pytask_slurm.execute.cancel_jobs") as cancel:
+            _cancel_remaining_jobs(session, running)
+        cancel.assert_not_called()
 
 
 class TestIsActionableStatus:
@@ -249,3 +275,65 @@ class TestProcessNonzeroExit:
         exc = report.exc_info[1]
         assert "exited with code 137" in str(exc)
         assert "empty or not yet available" in str(exc)
+
+
+class TestReadResultReport:
+    @patch("pytask_slurm.execute._process_completed_job")
+    def test_reads_result_pickle_when_present_and_stable(
+        self, mock_completed: MagicMock, tmp_path: Path
+    ) -> None:
+        """A failed job whose result pickle exists is read for the real traceback."""
+        result_file = tmp_path / "result.pkl"
+        result_file.write_bytes(b"data")
+        old = time.time() - 100
+        os.utime(result_file, (old, old))
+        job = _make_slurm_job(result_path=result_file)
+
+        result = _read_result_report(MagicMock(), MagicMock(), job)
+
+        mock_completed.assert_called_once()
+        assert result is mock_completed.return_value
+
+    def test_returns_none_when_result_pickle_missing(self, tmp_path: Path) -> None:
+        """A job killed before writing a result pickle returns None to fall back."""
+        job = _make_slurm_job(result_path=tmp_path / "missing.pkl")
+
+        assert _read_result_report(MagicMock(), MagicMock(), job) is None
+
+
+def _failing_execute(**_kwargs: object) -> None:
+    raise ValueError("kaboom")
+
+
+class TestRunnerExitCode:
+    def _run_failing_task(self, tmp_path: Path) -> Path:
+        payload_path = tmp_path / "p_payload.pkl"
+        result_path = tmp_path / "p_result.pkl"
+        task = SimpleNamespace(name="task_x", execute=_failing_execute)
+        payload = SimpleNamespace(
+            task=task,
+            kwargs={},
+            console_options=console.options,
+            session_filterwarnings=[],
+            show_locals=False,
+            task_filterwarnings=[],
+        )
+        with payload_path.open("wb") as f:
+            cloudpickle.dump(payload, f)
+        with pytest.raises(SystemExit) as excinfo:
+            run_task(str(payload_path), str(result_path))
+        assert excinfo.value.code == 1
+        return result_path
+
+    def test_exits_nonzero_when_task_raises(self, tmp_path: Path) -> None:
+        """A raising task makes the runner exit 1 so SLURM reports the job FAILED."""
+        self._run_failing_task(tmp_path)
+
+    def test_writes_result_pickle_with_traceback_before_exit(
+        self, tmp_path: Path
+    ) -> None:
+        """The result pickle with the traceback is written despite the non-zero exit."""
+        result_path = self._run_failing_task(tmp_path)
+        with result_path.open("rb") as f:
+            wrapper_result = cloudpickle.load(f)
+        assert wrapper_result.exc_info is not None

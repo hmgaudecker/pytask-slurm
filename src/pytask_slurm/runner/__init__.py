@@ -170,7 +170,23 @@ def run_task(payload_path: str, result_path: str) -> None:
         stderr=captured_stderr,
     )
 
+    _write_result_and_exit(
+        result_path, wrapper_result, failed=processed_exc_info is not None
+    )
+
+
+def _write_result_and_exit(
+    result_path: str, wrapper_result: WrapperResult, *, failed: bool
+) -> None:
+    """Write the result pickle, then exit non-zero if the task failed.
+
+    Exiting non-zero makes SLURM report the job as FAILED rather than COMPLETED. The
+    pickle (written first) still carries the structured traceback, which the
+    submitting process reads from the failure path.
+    """
     result_file = Path(result_path)
     result_file.parent.mkdir(parents=True, exist_ok=True)
     with result_file.open("wb") as f:
         cloudpickle.dump(wrapper_result, f)
+    if failed:
+        sys.exit(1)

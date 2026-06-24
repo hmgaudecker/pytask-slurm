@@ -20,8 +20,18 @@ from pytask_parallel.utils import (
     strip_annotation_locals,
 )
 
+from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
+
 if TYPE_CHECKING:
     from pytask import PTask
+
+_ACTIVE_STATUSES = frozenset({SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING})
+
+
+def compute_task_hash(task_name: str) -> str:
+    """Deterministic short hash identifying a task's SLURM sidecar files."""
+    return hashlib.sha256(task_name.encode()).hexdigest()[:16]
+
 
 _SLURM_MARK_KEYS = frozenset(
     {
@@ -47,7 +57,51 @@ class SlurmJob:
     payload_path: Path
     result_path: Path
     log_path: Path
+    task_hash: str = ""
     submitted_at: float = field(default_factory=time.monotonic)
+
+
+def _jobid_path(work_dir: Path, task_hash: str) -> Path:
+    return work_dir / f"{task_hash}.jobid"
+
+
+def reattach_task(task: PTask, work_dir: Path) -> SlurmJob | None:
+    """Re-attach to the SLURM job already submitted for *task*, if still active.
+
+    A controller that submitted a job and then exited (cleanly or by crashing)
+    leaves the job running and its id recorded in `<task_hash>.jobid`. A restarted
+    controller calls this first: when the recorded job is still pending or running
+    it returns a `SlurmJob` to monitor in place of submitting a duplicate. A
+    missing/empty record, or a job that has already left the queue, returns None
+    (and the stale record is removed) so the caller submits fresh.
+    """
+    task_hash = compute_task_hash(task.name)
+    jobid_path = _jobid_path(work_dir, task_hash)
+    if not jobid_path.exists():
+        return None
+    job_id = jobid_path.read_text().strip()
+    if not job_id:
+        jobid_path.unlink(missing_ok=True)
+        return None
+    result = poll_job_statuses([job_id]).get(job_id)
+    if result is None or result.status not in _ACTIVE_STATUSES:
+        jobid_path.unlink(missing_ok=True)
+        return None
+    return SlurmJob(
+        job_id=job_id,
+        task_name=task.name,
+        payload_path=work_dir / f"{task_hash}_payload.pkl",
+        result_path=work_dir / f"{task_hash}_result.pkl",
+        log_path=work_dir / f"{task_hash}.log",
+        task_hash=task_hash,
+    )
+
+
+def clear_job_record(slurm_job: SlurmJob) -> None:
+    """Remove a job's persisted id once it has reached a terminal state."""
+    if slurm_job.task_hash:
+        work_dir = slurm_job.result_path.parent
+        _jobid_path(work_dir, slurm_job.task_hash).unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -108,6 +162,7 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
         "gpus": session_config["slurm_gpus"],
         "extra": session_config["slurm_extra"],
         "python_unbuffered": session_config["slurm_python_unbuffered"],
+        "job_name_prefix": session_config["slurm_job_name_prefix"],
         "env": dict(session_config.get("slurm_env") or {}),
     }
 
@@ -129,6 +184,19 @@ def _get_slurm_options(task: PTask, session_config: dict[str, Any]) -> dict[str,
             options["env"] = {**options["env"], **dict(mark_env)}
 
     return options
+
+
+def _quote_env_value(value: str) -> str:
+    """Quote an env value for a job-script ``export``, keeping shell-variable expansion.
+
+    Wraps the value in double quotes so the worker shell expands references like
+    ``$SLURM_JOB_ID`` at job runtime (which ``shlex.quote``'s single quotes would
+    suppress) while still preserving spaces. Backslashes, double quotes, and
+    backticks are escaped so a value cannot break out of the quoting; ``$`` is left
+    active so expansion works.
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+    return f'"{escaped}"'
 
 
 def _write_batch_script(
@@ -156,11 +224,11 @@ def _write_batch_script(
     level needs live progress visibility.
 
     `env` exports arbitrary environment variables before the runner. Values
-    pass through ``shlex.quote`` so spaces and shell metacharacters are
-    preserved verbatim; references like ``$SLURM_JOB_ID`` are intentionally
-    NOT pre-expanded here so the worker shell evaluates them on the compute
-    node (this is the standard way to derive a node-local, per-job path).
-    Use this slot for backend-specific tuning that pylcm/JAX/XLA read at
+    are wrapped in double quotes so spaces are preserved while shell-variable
+    references like ``$SLURM_JOB_ID`` expand on the compute node — the standard
+    way to derive a node-local, per-job path. (Single-quoting via ``shlex.quote``
+    would suppress that expansion, leaving the literal ``$SLURM_JOB_ID`` in the
+    value.) Use this slot for backend-specific tuning that pylcm/JAX/XLA read at
     process start: ``XLA_PYTHON_CLIENT_MEM_FRACTION``,
     ``XLA_PYTHON_CLIENT_ALLOCATOR``, ``XLA_FLAGS``,
     ``JAX_COMPILATION_CACHE_DIR``, etc.
@@ -177,7 +245,7 @@ def _write_batch_script(
     env_lines = ""
     if env:
         for key, value in env.items():
-            env_lines += f"export {key}={shlex.quote(str(value))}\n"
+            env_lines += f"export {key}={_quote_env_value(str(value))}\n"
     script_path.write_text(
         f"#!/bin/bash\n"
         f"# pytask-slurm batch script (auto-generated)\n"
@@ -203,10 +271,12 @@ def _build_sbatch_cmd(
     script_path: Path,
 ) -> list[str]:
     """Build the sbatch command list from task options."""
+    prefix = opts.get("job_name_prefix")
+    job_name = f"pytask-{prefix}-{task_hash}" if prefix else f"pytask-{task_hash}"
     cmd = [
         "sbatch",
         "--parsable",
-        f"--job-name=pytask-{task_hash}",
+        f"--job-name={job_name}",
         f"--output={log_path}",
     ]
 
@@ -240,7 +310,7 @@ def submit_task(
     work_dir: Path,
 ) -> SlurmJob:
     """Serialize a task and submit it to SLURM via sbatch."""
-    task_hash = hashlib.sha256(task.name.encode()).hexdigest()[:16]
+    task_hash = compute_task_hash(task.name)
 
     payload_path = work_dir / f"{task_hash}_payload.pkl"
     result_path = work_dir / f"{task_hash}_result.pkl"
@@ -316,10 +386,15 @@ def submit_task(
 
     job_id = result.stdout.strip().split(";")[0]
 
+    # Record the job id so a restarted controller re-attaches instead of
+    # submitting a duplicate (paired with `slurm_cancel_on_exit = false`).
+    _jobid_path(work_dir, task_hash).write_text(job_id)
+
     return SlurmJob(
         job_id=job_id,
         task_name=task.name,
         payload_path=payload_path,
         result_path=result_path,
         log_path=log_path,
+        task_hash=task_hash,
     )

@@ -7,7 +7,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import cloudpickle
 from _pytask.node_protocols import PPathNode
@@ -16,8 +16,13 @@ from pytask.tree_util import tree_leaves, tree_map, tree_structure
 from pytask_parallel.typing import CarryOverPath
 
 from pytask_slurm.cancel import cancel_jobs
-from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
-from pytask_slurm.submit import SlurmJob, submit_task
+from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus, poll_job_statuses
+from pytask_slurm.submit import (
+    SlurmJob,
+    clear_job_record,
+    reattach_task,
+    submit_task,
+)
 
 if TYPE_CHECKING:
     from pytask import PTask
@@ -103,11 +108,22 @@ def pytask_execute_build(session: Session) -> bool | None:
                 break
 
     finally:
-        remaining_ids = [j.job_id for j in running_jobs.values()]
-        if remaining_ids:
-            cancel_jobs(remaining_ids)
+        _cancel_remaining_jobs(session, running_jobs)
 
     return True
+
+
+def _cancel_remaining_jobs(session: Session, running_jobs: dict[str, SlurmJob]) -> None:
+    """Cancel jobs still running at controller exit, unless opted out.
+
+    With `slurm_cancel_on_exit = false` the jobs are left running so the work
+    survives a controller death; a restarted controller re-attaches to them.
+    """
+    if not session.config["slurm_cancel_on_exit"]:
+        return
+    remaining_ids = [j.job_id for j in running_jobs.values()]
+    if remaining_ids:
+        cancel_jobs(remaining_ids)
 
 
 def _submit_ready_tasks(
@@ -125,12 +141,21 @@ def _submit_ready_tasks(
     ready_tasks = list(session.scheduler.get_ready(n_new_tasks))
 
     for task_name in ready_tasks:
-        task = session.dag.nodes[task_name]
+        task = cast("PTask", session.dag.nodes[task_name])
         session.hook.pytask_execute_task_log_start(session=session, task=task)
         try:
             session.hook.pytask_execute_task_setup(session=session, task=task)
-            slurm_job = submit_task(task, session.config, work_dir)
-            running_jobs[task_name] = slurm_job
+            reattached = reattach_task(task, work_dir)
+            if reattached is not None:
+                logger.info(
+                    "Re-attached to running SLURM job %s for task %r instead of "
+                    "resubmitting (controller restart).",
+                    reattached.job_id,
+                    task_name,
+                )
+                running_jobs[task_name] = reattached
+            else:
+                running_jobs[task_name] = submit_task(task, session.config, work_dir)
         except Exception:  # noqa: BLE001
             report = ExecutionReport.from_task_and_exception(task, sys.exc_info())
             newly_collected.append(report)
@@ -236,15 +261,8 @@ def _collect_completed_jobs(
         if not _is_actionable_status(job_result.status, slurm_job, unknown_timeout):
             continue
 
-        task = session.dag.nodes[task_name]
-        if job_result.status == SlurmJobStatus.COMPLETED:
-            if job_result.exit_code is not None and job_result.exit_code != 0:
-                report = _process_nonzero_exit(task, slurm_job, job_result.exit_code)
-            else:
-                report = _process_completed_job(session, task, slurm_job)
-        else:
-            report = _process_failed_job(task, slurm_job, job_result.status)
-
+        task = cast("PTask", session.dag.nodes[task_name])
+        report = _build_terminal_report(session, task, slurm_job, job_result)
         newly_collected.append(report)
         completed_task_names.append(task_name)
 
@@ -258,7 +276,8 @@ def _collect_completed_jobs(
     completed_task_names.extend(fallback_names)
 
     for task_name in completed_task_names:
-        running_jobs.pop(task_name)
+        finished = running_jobs.pop(task_name)
+        clear_job_record(finished)
         session.scheduler.done(task_name)
 
     return newly_collected
@@ -274,6 +293,50 @@ def _process_reports(
         session.hook.pytask_execute_task_process_report(session=session, report=report)
         session.hook.pytask_execute_task_log_end(session=session, report=report)
         reports.append(report)
+
+
+def _build_terminal_report(
+    session: Session,
+    task: PTask,
+    slurm_job: SlurmJob,
+    job_result: SlurmJobResult,
+) -> ExecutionReport:
+    """Build the execution report for a job that has reached a terminal state.
+
+    A task that raised records its structured traceback in the result pickle and
+    exits non-zero, so a failed job is reported from that pickle when present; only
+    a job killed before writing one falls back to the SLURM-state / log-tail report.
+    """
+    if job_result.status == SlurmJobStatus.COMPLETED:
+        exit_code = job_result.exit_code
+        if exit_code is None or exit_code == 0:
+            return _process_completed_job(session, task, slurm_job)
+        return _read_result_report(session, task, slurm_job) or _process_nonzero_exit(
+            task, slurm_job, exit_code
+        )
+    return _read_result_report(session, task, slurm_job) or _process_failed_job(
+        task, slurm_job, job_result.status
+    )
+
+
+def _read_result_report(
+    session: Session,
+    task: PTask,
+    slurm_job: SlurmJob,
+) -> ExecutionReport | None:
+    """Return the report from this run's result pickle, or None to fall back.
+
+    A non-zero exit or a non-COMPLETED status means the job failed. The common case
+    is a task that raised: the runner records the traceback in the result pickle and
+    exits non-zero, so reading that pickle surfaces the real exception (the same
+    detail as a clean run). `submit_task` removes any stale pickle before submitting,
+    so a present pickle always belongs to this run. Returns None when no pickle was
+    written — the job was killed mid-task by OOM or timeout — so the caller falls back
+    to the SLURM-state / log-tail report.
+    """
+    if slurm_job.result_path.exists() and _result_file_is_stable(slurm_job.result_path):
+        return _process_completed_job(session, task, slurm_job)
+    return None
 
 
 def _process_completed_job(
