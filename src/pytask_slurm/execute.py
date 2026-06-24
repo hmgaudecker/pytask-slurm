@@ -17,7 +17,12 @@ from pytask_parallel.typing import CarryOverPath
 
 from pytask_slurm.cancel import cancel_jobs
 from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus, poll_job_statuses
-from pytask_slurm.submit import SlurmJob, submit_task
+from pytask_slurm.submit import (
+    SlurmJob,
+    clear_job_record,
+    reattach_task,
+    submit_task,
+)
 
 if TYPE_CHECKING:
     from pytask import PTask
@@ -103,11 +108,22 @@ def pytask_execute_build(session: Session) -> bool | None:
                 break
 
     finally:
-        remaining_ids = [j.job_id for j in running_jobs.values()]
-        if remaining_ids:
-            cancel_jobs(remaining_ids)
+        _cancel_remaining_jobs(session, running_jobs)
 
     return True
+
+
+def _cancel_remaining_jobs(session: Session, running_jobs: dict[str, SlurmJob]) -> None:
+    """Cancel jobs still running at controller exit, unless opted out.
+
+    With `slurm_cancel_on_exit = false` the jobs are left running so the work
+    survives a controller death; a restarted controller re-attaches to them.
+    """
+    if not session.config["slurm_cancel_on_exit"]:
+        return
+    remaining_ids = [j.job_id for j in running_jobs.values()]
+    if remaining_ids:
+        cancel_jobs(remaining_ids)
 
 
 def _submit_ready_tasks(
@@ -125,12 +141,21 @@ def _submit_ready_tasks(
     ready_tasks = list(session.scheduler.get_ready(n_new_tasks))
 
     for task_name in ready_tasks:
-        task = session.dag.nodes[task_name]
+        task = cast("PTask", session.dag.nodes[task_name])
         session.hook.pytask_execute_task_log_start(session=session, task=task)
         try:
             session.hook.pytask_execute_task_setup(session=session, task=task)
-            slurm_job = submit_task(task, session.config, work_dir)
-            running_jobs[task_name] = slurm_job
+            reattached = reattach_task(task, work_dir)
+            if reattached is not None:
+                logger.info(
+                    "Re-attached to running SLURM job %s for task %r instead of "
+                    "resubmitting (controller restart).",
+                    reattached.job_id,
+                    task_name,
+                )
+                running_jobs[task_name] = reattached
+            else:
+                running_jobs[task_name] = submit_task(task, session.config, work_dir)
         except Exception:  # noqa: BLE001
             report = ExecutionReport.from_task_and_exception(task, sys.exc_info())
             newly_collected.append(report)
@@ -251,7 +276,8 @@ def _collect_completed_jobs(
     completed_task_names.extend(fallback_names)
 
     for task_name in completed_task_names:
-        running_jobs.pop(task_name)
+        finished = running_jobs.pop(task_name)
+        clear_job_record(finished)
         session.scheduler.done(task_name)
 
     return newly_collected

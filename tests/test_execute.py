@@ -15,6 +15,7 @@ from pytask import console
 
 from pytask_slurm.execute import (
     _LOG_TAIL_MAX_CHARS,
+    _cancel_remaining_jobs,
     _check_result_file_fallback,
     _is_actionable_status,
     _process_nonzero_exit,
@@ -41,6 +42,26 @@ def _make_slurm_job(
         log_path=log_path or Path("/fake/job.log"),
         submitted_at=submitted_at,
     )
+
+
+class TestCancelRemainingJobs:
+    """Cancel-on-exit is opt-out so long runs survive a controller death."""
+
+    def test_cancels_running_jobs_by_default(self) -> None:
+        session = MagicMock()
+        session.config = {"slurm_cancel_on_exit": True}
+        running = {"t": _make_slurm_job(job_id="999")}
+        with patch("pytask_slurm.execute.cancel_jobs") as cancel:
+            _cancel_remaining_jobs(session, running)
+        cancel.assert_called_once_with(["999"])
+
+    def test_leaves_jobs_running_when_opted_out(self) -> None:
+        session = MagicMock()
+        session.config = {"slurm_cancel_on_exit": False}
+        running = {"t": _make_slurm_job(job_id="999")}
+        with patch("pytask_slurm.execute.cancel_jobs") as cancel:
+            _cancel_remaining_jobs(session, running)
+        cancel.assert_not_called()
 
 
 class TestIsActionableStatus:

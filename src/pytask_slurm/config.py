@@ -33,6 +33,11 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     # name- or user-scoped `scancel` cleaning up one cancels the other's jobs;
     # a per-project prefix keeps them distinct.
     config.setdefault("slurm_job_name_prefix", None)
+    # When True (default), jobs still running when the controller exits are
+    # cancelled. Set False for long production runs so the job survives a
+    # controller death (Ctrl-C, login-node reboot, a polling-loop error); a
+    # restarted controller re-attaches to it via its persisted job id.
+    config.setdefault("slurm_cancel_on_exit", True)
     # When True, the batch script exports `PYTHONUNBUFFERED=1` before the
     # runner. Compute-node stdout is a file (not a TTY), so Python defaults
     # to block-buffered I/O and per-period log lines only land at process

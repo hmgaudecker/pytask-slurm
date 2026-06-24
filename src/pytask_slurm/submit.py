@@ -20,8 +20,18 @@ from pytask_parallel.utils import (
     strip_annotation_locals,
 )
 
+from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
+
 if TYPE_CHECKING:
     from pytask import PTask
+
+_ACTIVE_STATUSES = frozenset({SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING})
+
+
+def compute_task_hash(task_name: str) -> str:
+    """Deterministic short hash identifying a task's SLURM sidecar files."""
+    return hashlib.sha256(task_name.encode()).hexdigest()[:16]
+
 
 _SLURM_MARK_KEYS = frozenset(
     {
@@ -47,7 +57,51 @@ class SlurmJob:
     payload_path: Path
     result_path: Path
     log_path: Path
+    task_hash: str = ""
     submitted_at: float = field(default_factory=time.monotonic)
+
+
+def _jobid_path(work_dir: Path, task_hash: str) -> Path:
+    return work_dir / f"{task_hash}.jobid"
+
+
+def reattach_task(task: PTask, work_dir: Path) -> SlurmJob | None:
+    """Re-attach to the SLURM job already submitted for *task*, if still active.
+
+    A controller that submitted a job and then exited (cleanly or by crashing)
+    leaves the job running and its id recorded in `<task_hash>.jobid`. A restarted
+    controller calls this first: when the recorded job is still pending or running
+    it returns a `SlurmJob` to monitor in place of submitting a duplicate. A
+    missing/empty record, or a job that has already left the queue, returns None
+    (and the stale record is removed) so the caller submits fresh.
+    """
+    task_hash = compute_task_hash(task.name)
+    jobid_path = _jobid_path(work_dir, task_hash)
+    if not jobid_path.exists():
+        return None
+    job_id = jobid_path.read_text().strip()
+    if not job_id:
+        jobid_path.unlink(missing_ok=True)
+        return None
+    result = poll_job_statuses([job_id]).get(job_id)
+    if result is None or result.status not in _ACTIVE_STATUSES:
+        jobid_path.unlink(missing_ok=True)
+        return None
+    return SlurmJob(
+        job_id=job_id,
+        task_name=task.name,
+        payload_path=work_dir / f"{task_hash}_payload.pkl",
+        result_path=work_dir / f"{task_hash}_result.pkl",
+        log_path=work_dir / f"{task_hash}.log",
+        task_hash=task_hash,
+    )
+
+
+def clear_job_record(slurm_job: SlurmJob) -> None:
+    """Remove a job's persisted id once it has reached a terminal state."""
+    if slurm_job.task_hash:
+        work_dir = slurm_job.result_path.parent
+        _jobid_path(work_dir, slurm_job.task_hash).unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -256,7 +310,7 @@ def submit_task(
     work_dir: Path,
 ) -> SlurmJob:
     """Serialize a task and submit it to SLURM via sbatch."""
-    task_hash = hashlib.sha256(task.name.encode()).hexdigest()[:16]
+    task_hash = compute_task_hash(task.name)
 
     payload_path = work_dir / f"{task_hash}_payload.pkl"
     result_path = work_dir / f"{task_hash}_result.pkl"
@@ -332,10 +386,15 @@ def submit_task(
 
     job_id = result.stdout.strip().split(";")[0]
 
+    # Record the job id so a restarted controller re-attaches instead of
+    # submitting a duplicate (paired with `slurm_cancel_on_exit = false`).
+    _jobid_path(work_dir, task_hash).write_text(job_id)
+
     return SlurmJob(
         job_id=job_id,
         task_name=task.name,
         payload_path=payload_path,
         result_path=result_path,
         log_path=log_path,
+        task_hash=task_hash,
     )

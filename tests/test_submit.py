@@ -4,17 +4,64 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from pytask import Mark
 
+from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus
 from pytask_slurm.submit import (
     _build_sbatch_cmd,
     _get_slurm_options,
     _write_batch_script,
+    compute_task_hash,
+    reattach_task,
 )
+
+
+class TestReattach:
+    """Re-attach a restarted controller to its already-submitted job."""
+
+    def test_no_record_returns_none(self, tmp_path: Path) -> None:
+        """With no persisted job-id, re-attach yields nothing (submit fresh)."""
+        task = SimpleNamespace(name="task_estimate_parameters")
+        assert reattach_task(task, tmp_path) is None  # type: ignore[arg-type]
+
+    def test_active_job_reattaches_without_resubmitting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A persisted job still running is re-attached, paths reconstructed."""
+        task = SimpleNamespace(name="task_estimate_parameters")
+        task_hash = compute_task_hash("task_estimate_parameters")
+        (tmp_path / f"{task_hash}.jobid").write_text("424242")
+        monkeypatch.setattr(
+            "pytask_slurm.submit.poll_job_statuses",
+            lambda _ids: {"424242": SlurmJobResult(status=SlurmJobStatus.RUNNING)},
+        )
+
+        job = reattach_task(task, tmp_path)  # type: ignore[arg-type]
+
+        assert job is not None
+        assert job.job_id == "424242"
+        assert job.result_path == tmp_path / f"{task_hash}_result.pkl"
+
+    def test_terminal_job_clears_stale_record_and_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A persisted job that already finished is stale: clear it, submit fresh."""
+        task = SimpleNamespace(name="task_estimate_parameters")
+        jobid = tmp_path / f"{compute_task_hash('task_estimate_parameters')}.jobid"
+        jobid.write_text("424242")
+        monkeypatch.setattr(
+            "pytask_slurm.submit.poll_job_statuses",
+            lambda _ids: {"424242": SlurmJobResult(status=SlurmJobStatus.COMPLETED)},
+        )
+
+        assert reattach_task(task, tmp_path) is None  # type: ignore[arg-type]
+        assert not jobid.exists()
+
 
 _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_partition": "default",
