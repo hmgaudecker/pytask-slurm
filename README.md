@@ -28,7 +28,8 @@ There are two ways to set SLURM job resources:
 
 ### 1. Configuration file (`pyproject.toml`)
 
-Set defaults in your project's `pyproject.toml` so every task picks them up automatically:
+Set defaults in your project's `pyproject.toml` so every task picks them up
+automatically:
 
 ```toml
 [tool.pytask.ini_options]
@@ -60,32 +61,32 @@ def task_gpu_training(): ...
 
 ### Job resource options
 
-| pyproject.toml key | Decorator key | Type | Description |
-|---|---|---|---|
-| `slurm_partition` | `partition` | str | SLURM partition |
-| `slurm_time` | `time` | str | Time limit (HH:MM:SS) |
-| `slurm_mem` | `mem` | str | Memory per job |
-| `slurm_cpus_per_task` | `cpus_per_task` | int | CPUs per task |
-| `slurm_account` | `account` | str | SLURM account |
-| `slurm_qos` | `qos` | str | Quality-of-service |
-| `slurm_gpus` | `gpus` | int | GPUs per task |
+| pyproject.toml key    | Decorator key   | Type | Description           |
+| --------------------- | --------------- | ---- | --------------------- |
+| `slurm_partition`     | `partition`     | str  | SLURM partition       |
+| `slurm_time`          | `time`          | str  | Time limit (HH:MM:SS) |
+| `slurm_mem`           | `mem`           | str  | Memory per job        |
+| `slurm_cpus_per_task` | `cpus_per_task` | int  | CPUs per task         |
+| `slurm_account`       | `account`       | str  | SLURM account         |
+| `slurm_qos`           | `qos`           | str  | Quality-of-service    |
+| `slurm_gpus`          | `gpus`          | int  | GPUs per task         |
 
 All options are only passed to sbatch when explicitly set. There are no built-in
 defaults — you must configure every option you need.
 
 ### Executor options (pytask-slurm internal, not passed to sbatch)
 
-| pyproject.toml key | Type | Default | Description |
-|---|---|---|---|
-| `slurm_max_jobs` | int | 50 | Max concurrent SLURM jobs |
-| `slurm_poll_interval` | float | 10 | Seconds between sacct polls |
-| `slurm_unknown_timeout` | int | 300 | Seconds a job may stay UNKNOWN before treated as failed |
+| pyproject.toml key      | Type  | Default | Description                                             |
+| ----------------------- | ----- | ------- | ------------------------------------------------------- |
+| `slurm_max_jobs`        | int   | 50      | Max concurrent SLURM jobs                               |
+| `slurm_poll_interval`   | float | 10      | Seconds between sacct polls                             |
+| `slurm_unknown_timeout` | int   | 300     | Seconds a job may stay UNKNOWN before treated as failed |
 
 ### Extra sbatch flags
 
 | pyproject.toml key | Decorator key | Type |
-|---|---|---|
-| `slurm_extra` | `extra` | str |
+| ------------------ | ------------- | ---- |
+| `slurm_extra`      | `extra`       | str  |
 
 See the next section for details.
 
@@ -118,8 +119,8 @@ def task_big_job(): ...
 ### Combining both sources
 
 `extra` follows the same merging rules as all other SLURM options: the decorator value
-overrides the config value. If only the config sets `extra`, those flags are used. If the
-decorator also sets `extra`, it replaces the config value entirely.
+overrides the config value. If only the config sets `extra`, those flags are used. If
+the decorator also sets `extra`, it replaces the config value entirely.
 
 ## Using with other pytask flags
 

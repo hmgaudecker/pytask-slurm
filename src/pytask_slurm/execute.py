@@ -16,7 +16,7 @@ from pytask.tree_util import tree_leaves, tree_map, tree_structure
 from pytask_parallel.typing import CarryOverPath
 
 from pytask_slurm.cancel import cancel_jobs
-from pytask_slurm.monitor import SlurmJobResult, SlurmJobStatus, poll_job_statuses
+from pytask_slurm.monitor import SlurmJobStatus, poll_job_statuses
 from pytask_slurm.submit import SlurmJob, submit_task
 
 if TYPE_CHECKING:
@@ -53,9 +53,15 @@ def _refresh_nfs_cache(directory: Path) -> None:
         pass
 
 
-@hookimpl
+@hookimpl(tryfirst=True)
 def pytask_execute_build(session: Session) -> bool | None:
     """Execute tasks by submitting them as SLURM jobs.
+
+    `tryfirst=True` ensures this hook runs before any other
+    `pytask_execute_build` impl (notably `pytask-parallel`'s, which is
+    also registered when both plugins are active). Returning a non-None
+    value short-circuits pluggy's hook chain, so pytask-parallel never
+    gets to dispatch the same ready tasks to its local process pool.
 
     Three-phase loop (same structure as pytask-parallel):
     1. Submit ready tasks via sbatch (up to max_jobs).
@@ -119,7 +125,7 @@ def _submit_ready_tasks(
     ready_tasks = list(session.scheduler.get_ready(n_new_tasks))
 
     for task_name in ready_tasks:
-        task = session.dag.nodes[task_name]["task"]
+        task = session.dag.nodes[task_name]
         session.hook.pytask_execute_task_log_start(session=session, task=task)
         try:
             session.hook.pytask_execute_task_setup(session=session, task=task)
@@ -193,7 +199,7 @@ def _check_result_file_fallback(
                 slurm_job.job_id,
                 task_name,
             )
-            task = session.dag.nodes[task_name]["task"]
+            task = session.dag.nodes[task_name]
             reports.append(_process_completed_job(session, task, slurm_job))
             fallback_task_names.append(task_name)
     return reports, fallback_task_names
@@ -230,7 +236,7 @@ def _collect_completed_jobs(
         if not _is_actionable_status(job_result.status, slurm_job, unknown_timeout):
             continue
 
-        task = session.dag.nodes[task_name]["task"]
+        task = session.dag.nodes[task_name]
         if job_result.status == SlurmJobStatus.COMPLETED:
             if job_result.exit_code is not None and job_result.exit_code != 0:
                 report = _process_nonzero_exit(task, slurm_job, job_result.exit_code)

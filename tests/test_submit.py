@@ -25,6 +25,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "slurm_qos": None,
     "slurm_gpus": None,
     "slurm_extra": None,
+    "slurm_python_unbuffered": False,
 }
 
 
@@ -108,7 +109,6 @@ class TestGetSlurmOptionsConfigValidation:
         assert result["cpus_per_task"] is None
 
 
-
 class TestQosOption:
     def test_qos_from_config(self) -> None:
         config = {**_DEFAULT_CONFIG, "slurm_qos": "high"}
@@ -131,7 +131,6 @@ class TestQosOption:
         with patch("pytask_slurm.submit.get_marks", return_value=[_mark(qos="low")]):
             result = _get_slurm_options(_FakeTask(), config)  # type: ignore[arg-type]
         assert result["qos"] == "low"
-
 
 
 _FULL_OPTS: dict[str, Any] = {
@@ -221,7 +220,6 @@ class TestBuildSbatchCmd:
         assert "--nodelist=node01" in cmd
 
 
-
 class TestBuildSbatchCmdExtraKwargs:
     """Tests for extra string in _build_sbatch_cmd."""
 
@@ -258,19 +256,25 @@ class TestWriteBatchScript:
 
     def test_shebang_present(self, tmp_path: Path) -> None:
         script = tmp_path / "job.sh"
-        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        _write_batch_script(
+            "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
+        )
         content = script.read_text()
         assert content.startswith("#!/bin/bash\n")
 
     def test_stderr_redirect(self, tmp_path: Path) -> None:
         script = tmp_path / "job.sh"
-        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        _write_batch_script(
+            "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
+        )
         content = script.read_text()
         assert "exec 2>&1" in content
 
     def test_diagnostic_echoes(self, tmp_path: Path) -> None:
         script = tmp_path / "job.sh"
-        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        _write_batch_script(
+            "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
+        )
         content = script.read_text()
         assert "pytask-slurm: starting" in content
         assert "pytask-slurm: runner exited with code" in content
@@ -287,12 +291,60 @@ class TestWriteBatchScript:
 
     def test_exit_code_propagation(self, tmp_path: Path) -> None:
         script = tmp_path / "job.sh"
-        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        _write_batch_script(
+            "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
+        )
         content = script.read_text()
         assert "_exit_code=$?" in content
         assert "exit $_exit_code" in content
 
     def test_script_is_executable(self, tmp_path: Path) -> None:
         script = tmp_path / "job.sh"
-        _write_batch_script("/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script)
+        _write_batch_script(
+            "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
+        )
         assert os.access(script, os.X_OK)
+
+    def test_scrubs_jax_platforms_before_runner(self, tmp_path: Path) -> None:
+        """`JAX_PLATFORMS` is unset before the worker runs.
+
+        Login-node JAX-CUDA workarounds shouldn't bleed into compute-node
+        workers via sbatch env propagation.
+        """
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3", tmp_path / "p.pkl", tmp_path / "r.pkl", script
+        )
+        content = script.read_text()
+        unset_pos = content.find("unset JAX_PLATFORMS")
+        runner_pos = content.find("-m pytask_slurm.runner")
+        assert unset_pos != -1
+        assert unset_pos < runner_pos
+
+    def test_python_unbuffered_false_omits_export(self, tmp_path: Path) -> None:
+        """`python_unbuffered=False` leaves PYTHONUNBUFFERED unset."""
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3",
+            tmp_path / "p.pkl",
+            tmp_path / "r.pkl",
+            script,
+            python_unbuffered=False,
+        )
+        assert "PYTHONUNBUFFERED" not in script.read_text()
+
+    def test_python_unbuffered_true_exports_env(self, tmp_path: Path) -> None:
+        """`python_unbuffered=True` exports PYTHONUNBUFFERED=1 before the runner."""
+        script = tmp_path / "job.sh"
+        _write_batch_script(
+            "/usr/bin/python3",
+            tmp_path / "p.pkl",
+            tmp_path / "r.pkl",
+            script,
+            python_unbuffered=True,
+        )
+        content = script.read_text()
+        export_pos = content.find("export PYTHONUNBUFFERED=1")
+        runner_pos = content.find("-m pytask_slurm.runner")
+        assert export_pos != -1
+        assert export_pos < runner_pos

@@ -45,8 +45,8 @@ registers via the `pytask_slurm = "pytask_slurm.plugin"` entry-point.
 - **Graceful degradation**: `poll_job_statuses()` and `cancel_jobs()` catch all
   exceptions so missing SLURM commands don't crash the scheduler
 - **Per-task overrides**: `@pytask.mark.slurm(mem="16G", cpus_per_task=4)` overrides
-  `pyproject.toml` values; validated at submission time in `_get_slurm_options()`.
-  There are no built-in defaults — all options must be explicitly configured.
+  `pyproject.toml` values; validated at submission time in `_get_slurm_options()`. There
+  are no built-in defaults — all options must be explicitly configured.
 
 ### Test structure
 
