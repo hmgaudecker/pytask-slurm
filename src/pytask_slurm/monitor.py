@@ -53,7 +53,7 @@ def _parse_state(raw: str) -> SlurmJobStatus:
     SLURM sometimes appends suffixes like ``CANCELLED by 12345``.
 
     """
-    token = raw.split()[0] if raw else ""
+    token = raw.split(maxsplit=1)[0] if raw else ""
     return _STATE_MAP.get(token, SlurmJobStatus.UNKNOWN)
 
 
@@ -64,7 +64,7 @@ def _parse_exit_code(raw: str) -> int | None:
     """
     if not raw:
         return None
-    code_part = raw.split(":")[0]
+    code_part = raw.split(":", maxsplit=1)[0]
     try:
         return int(code_part)
     except ValueError:
