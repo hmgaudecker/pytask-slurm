@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sys
@@ -49,13 +50,29 @@ def _refresh_nfs_cache(directory: Path) -> None:
     """Force NFS attribute cache refresh by listing the directory.
 
     On shared filesystems, recently-written files may not be visible to the
-    login node immediately. Calling ``os.listdir()`` triggers a metadata
+    login node immediately. Listing it triggers a metadata
     lookup that invalidates the NFS attribute cache for the directory.
     """
-    try:
-        os.listdir(directory)
-    except OSError:
-        pass
+    with contextlib.suppress(OSError):
+        list(directory.iterdir())
+
+
+def get_work_dir(config: dict[str, Any]) -> Path:
+    """Return the directory for job payloads, results, logs and job ids.
+
+    `slurm_work_dir` may contain `~` and environment variables; a relative path is
+    taken relative to the project root. Unset, it is `<root>/.pytask/slurm`.
+    Payloads and logs can contain task data, so projects with confidential data
+    point it outside the checkout.
+    """
+    configured = config.get("slurm_work_dir")
+    if configured is None:
+        return config["root"] / ".pytask" / "slurm"
+    expanded = os.path.expandvars(str(configured))
+    if "$" in expanded:
+        msg = f"slurm_work_dir {configured!r} names an unset environment variable."
+        raise ValueError(msg)
+    return config["root"] / Path(expanded).expanduser()
 
 
 @hookimpl(tryfirst=True)
@@ -78,7 +95,7 @@ def pytask_execute_build(session: Session) -> bool | None:
     reports = session.execution_reports
     running_jobs: dict[str, SlurmJob] = {}
 
-    work_dir = session.config["root"] / ".pytask" / "slurm"
+    work_dir = get_work_dir(session.config)
     work_dir.mkdir(parents=True, exist_ok=True)
 
     poll_interval: float = session.config["slurm_poll_interval"]
@@ -246,8 +263,7 @@ def _collect_completed_jobs(
 
     # Refresh NFS cache once before reading any result/log files.
     work_dirs_refreshed: set[Path] = set()
-    for task_name in running_jobs:
-        slurm_job = running_jobs[task_name]
+    for slurm_job in running_jobs.values():
         parent = slurm_job.result_path.parent
         if parent not in work_dirs_refreshed:
             _refresh_nfs_cache(parent)
@@ -362,7 +378,10 @@ def _process_completed_job(
         if log_content:
             msg += f"\n\nSLURM log (last {_LOG_TAIL_MAX_CHARS} chars):\n{log_content}"
         else:
-            msg += "\n\nSLURM log is empty — the worker process may have crashed at startup."
+            msg += (
+                "\n\nSLURM log is empty — the worker process may have crashed at"
+                " startup."
+            )
 
         exc = RuntimeError(msg)
         exc.__cause__ = deserialize_err

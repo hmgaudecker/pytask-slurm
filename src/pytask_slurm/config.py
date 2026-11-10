@@ -38,6 +38,9 @@ def pytask_parse_config(config: dict[str, Any]) -> None:
     # controller death (Ctrl-C, login-node reboot, a polling-loop error); a
     # restarted controller re-attaches to it via its persisted job id.
     config.setdefault("slurm_cancel_on_exit", True)
+    # Directory for job payloads, results, logs and job ids (see
+    # `execute.get_work_dir`). None means `<root>/.pytask/slurm`.
+    config.setdefault("slurm_work_dir", None)
     # When True, the batch script exports `PYTHONUNBUFFERED=1` before the
     # runner. Compute-node stdout is a file (not a TTY), so Python defaults
     # to block-buffered I/O and per-period log lines only land at process

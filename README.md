@@ -76,11 +76,12 @@ defaults — you must configure every option you need.
 
 ### Executor options (pytask-slurm internal, not passed to sbatch)
 
-| pyproject.toml key      | Type  | Default | Description                                             |
-| ----------------------- | ----- | ------- | ------------------------------------------------------- |
-| `slurm_max_jobs`        | int   | 50      | Max concurrent SLURM jobs                               |
-| `slurm_poll_interval`   | float | 10      | Seconds between sacct polls                             |
-| `slurm_unknown_timeout` | int   | 300     | Seconds a job may stay UNKNOWN before treated as failed |
+| pyproject.toml key      | Type  | Default                | Description                                                                                                                                                                                          |
+| ----------------------- | ----- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slurm_max_jobs`        | int   | 50                     | Max concurrent SLURM jobs                                                                                                                                                                            |
+| `slurm_poll_interval`   | float | 10                     | Seconds between sacct polls                                                                                                                                                                          |
+| `slurm_unknown_timeout` | int   | 300                    | Seconds a job may stay UNKNOWN before treated as failed                                                                                                                                              |
+| `slurm_work_dir`        | str   | `<root>/.pytask/slurm` | Directory for job payloads, results and logs; `~` and `$VARS` are expanded, an unset variable is an error. Payloads and logs can hold task data: point it outside the checkout for confidential data |
 
 ### Extra sbatch flags
 
